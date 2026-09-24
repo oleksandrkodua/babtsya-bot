@@ -20,7 +20,7 @@ Requirements: `requirements.md`. Deploy from scratch: `DEPLOY.md`.
 
 ## Invariants — do not revert
 
-- The bot replies only to a reply-to-bot, the `@babtsya_z_altanky_bot` tag or a `/command`.
+- The bot answers only its @handle tag — not a reply to it, not a `/command`, not words that name it.
 - Replies carry no author name and pass through the `polish` corrector; service labels and foreign scripts are stripped by code.
 - Only reposts are filtered from digests; phone numbers and card numbers are redacted before the model sees them.
 - A digest message stays under `HARD_LIMIT` (3900) and is always one message.

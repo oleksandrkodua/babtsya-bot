@@ -32,7 +32,7 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку" };
 
 const redact = (t) => REDACTIONS.reduce((s, [re, ph]) => s.replace(re, ph), t);
 // "@nick" in the digest would ping that person; the bare nick keeps the meaning without a notification.
@@ -193,7 +193,7 @@ export const IMAGES = [
 
 // The model echoed its hints into the chat ("ПРИЙОМ: Синку Lida…", "ОБРАЗ: лавка біля під'їзду", 24.09.2026):
 // labels are cut, and a line that only repeats the image goes.
-const HINT_LABEL = /^\s*(?:ПРИЙОМ|ОБРАЗ(?: ДНЯ)?|ОБСЯГ|ПІДКАЗКА|[^\n:«»]{1,40} пише)\s*:\s*/iu;
+const HINT_LABEL = /^\s*(?:ПРИЙОМ|ОБРАЗ|ПІДКАЗКА|[^\n:«»]{1,40} пише)\s*:\s*/iu; // ОБРАЗ ДНЯ, ОБСЯГ: whole lines, in tidy
 export const stripHints = (text, image = "") =>
   text.split("\n").map((l) => l.replace(HINT_LABEL, ""))
     .filter((l) => l.trim() && l.trim().replace(/[.!]$/, "").toLowerCase() !== image.toLowerCase()).join("\n").trim();
@@ -226,6 +226,7 @@ export const genderLine = (names, set) => {
 
 // "@бабця + word" — a word from a topic turns the answer to it; a bare tag gets the general answer. First match wins.
 // Lunch only 12:00–14:00 Kyiv (user's rule, 24.09.2026); outside it such a tag gets the general answer.
+// Hints name no concrete places or objects: the model copied "на акції в АТБ, у колясочній" into all 8 samples.
 const W = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})`, "iu");
 export const REPLY_TOPICS = [
   { key: "обід", from: 12, to: 14, re: W("обід|обіда|пообіда|їсти|жерти|пиріж|борщ|вареник|котлет|голодн|їжа|їжу"),
@@ -233,9 +234,9 @@ export const REPLY_TOPICS = [
   { key: "хахалі", re: W("хахал|кавалер|залиця|кохан|любов|заміж|жених|ухажер|роман[иа]?(?![\\p{L}])|дід|дєд"),
     hint: "Тема — хахалі: розкажи коротко про одного зі своїх колишніх кавалерів (вигаданого, з дев'яностих чи вісімдесятих) — з деталлю, від якої смішно." },
   { key: "гороскоп", re: W("гороскоп|зодіак|зірк|астролог|ретроград|меркурі"),
-    hint: "Тема — гороскоп: дай авторові абсурдний гороскоп на сьогодні — які планети де стоять (у колясочній, на акції в АТБ) і чого остерігатись." },
+    hint: "Тема — гороскоп: дай авторові абсурдний гороскоп на сьогодні — де застрягли планети (місце бери з теми порівняння, не з АТБ і не з колясочної) і чого остерігатись." },
   { key: "погода", re: W("погод|дощ|спек|холод|сніг|вітер|мороз"),
-    hint: "Тема — погода: дай прогноз за своїми колінами, спиною й сусідами." },
+    hint: "Тема — погода: дай прогноз за якоюсь бабциною домашньою прикметою — щоразу іншою." },
   { key: "гроші", re: W("пенсі|грош|ціни|цін[аиу]|акці|зарплат|комуналк|кредит|долар|гривн"),
     hint: "Тема — гроші й пенсія: побурчи про ціни, пенсію й комуналку — з одним абсурдним розрахунком." },
   { key: "здоров'я", re: W("тиск|лікар|таблет|здоров|болить|аптек|поліклін|хвор"),
@@ -247,6 +248,27 @@ export const REPLY_TOPICS = [
   { key: "пророцтво", re: W("що буде|шо буде|завтра|передбач|пророк|майбутн|ворож"),
     hint: "Тема — пророцтво: передбач авторові чи двору щось пафосне й абсурдне." },
 ];
+// "@бабця + surname" — fixed answers, word for word as the user set them (24.09.2026); checked before topics and fire
+// wherever the name stands in the message. "порох" and "моль" are ordinary words too (gunpowder, moth), so they count
+// only when the message is that one word.
+const WE = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})(?![\\p{L}])`, "iu"); // whole words, for short or ambiguous stems
+export const FIXED_REPLIES = [
+  { re: W("зеленськ|зеленск|зелю|зєл[юяі]|zelensk"), alt: WE("зеля|зелі|зелька|зелик|зе"), text: "заїбав вже" },
+  { re: W("порошенк|poroshenk"), only: ["порох"], text: "найкращій президент" },
+  { re: W("ющенк|yushchenk"), alt: WE("ющ|юща|ющу|ющем|ющеві"), text: "так" },
+  { re: W("путін|путин|путлер|пуйл|бункерн|putin"), alt: WE("ввп|хуйло"), only: ["моль"], text: "хуйло" },
+  { re: W("трамп|трумп|trump|рудий|рудого|рудому|рижий|рыжий|рыжего"), text: "шизік" },
+  { re: W("д[іи][\\s-]?дже[йяюєї]"), alt: WE("dj"), text: "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!" },
+  // Whole surname forms only: "Федорівна" (patronymic) and "Федір" (first name) must not trigger.
+  { re: WE("федоров|федорова|федорову|федоровим|федорові|федорів|федорових|fedorov"), text: "роль кібербезпеки трохи перебільшена" },
+  { re: W("(?:бре+д+|брэ+д+|bra+d+)\\p{L}*[\\s-]*(?:пі+т+|пи+т+|пє+т+|pi+t+)"), text: "справжній мущина" },
+];
+export const fixedReply = (text) => {
+  const t = text.replace(/@\w+/g, "");
+  const bare = t.replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+  return FIXED_REPLIES.find((f) => f.re.test(t) || f.alt?.test(t) || f.only?.includes(bare))?.text || null;
+};
+
 export const topicFor = (text, hour) =>
   REPLY_TOPICS.find((t) => (t.from == null || (hour >= t.from && hour < t.to)) && t.re.test(text.replace(/@\w+/g, ""))) || null;
 
@@ -316,12 +338,21 @@ const SERVICE_INLINE = [
   /<[^<>\n]{1,80}>/gu, // template slots: <учасник>, <гротескна характеристика>
 ];
 
+// A Latin letter hiding inside a Cyrillic word ("обісрaли", 24.09.2026) becomes its Cyrillic twin; a word still mixed
+// after that ("маеdеlkа" at t=1.4) is noise and goes.
+const HOMOGLYPH = { a: "а", e: "е", o: "о", p: "р", c: "с", x: "х", i: "і", y: "у", A: "А", B: "В", C: "С", E: "Е", H: "Н", I: "І", K: "К", M: "М", O: "О", P: "Р", T: "Т", X: "Х" };
+const fixMixed = (t) => t.replace(/\p{L}+/gu, (w) => {
+  if (!/\p{Script=Cyrillic}/u.test(w) || !/[A-Za-z]/.test(w)) return w;
+  const fixed = w.replace(/[A-Za-z]/g, (c) => HOMOGLYPH[c] || c);
+  return /[A-Za-z]/.test(fixed) ? "" : fixed;
+});
+
 // Everything the model writes goes through this before Telegram: no pings, no placeholders, no service labels,
 // no foreign scripts.
 export const tidy = (text) =>
   SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
-    unmention(text).replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
+    fixMixed(unmention(text)).replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
       .replace(/«<([^<>»\n]*)>»/g, "«$1»") // the template's «<назва>» copied verbatim (24.09.2026)
       .replace(SERVICE_LINE, ""),
   )
@@ -332,7 +363,7 @@ export const tidy = (text) =>
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
 
 export function finalize(play) {
-  play = tidy(play).replace(/^\s*(?:ОБРАЗ ДНЯ|ОБСЯГ)\s*:.*\n?/gimu, "").replace(/([^\n])\n(\(Сцена)/g, "$1\n\n$2");
+  play = tidy(play).replace(/([^\n])\n(\(Сцена)/g, "$1\n\n$2");
   if (!play.trimStart().startsWith(`${BOT_NAME} представляє`)) play = `${BOT_NAME} представляє\n\n${play.trimStart()}`;
   if (play.length > HARD_LIMIT) {
     // ponytail: last-resort cut at a paragraph break drops the ending; fires only if "shorten" also failed.
@@ -436,13 +467,30 @@ if (import.meta.main) {
   assert.equal(genderLine(["Taras", "Lida", "Lida"], fem), "СТАТЬ: жінки — Lida; решта — чоловіки. Узгоджуй рід і звертання.\n\n");
   assert.equal(genderLine(["Taras"], fem), "");
   assert.ok(!finalize("СТАТЬ: жінки — Lida; решта — чоловіки.\nБабця з альтанки представляє\n\nтекст").includes("СТАТЬ"));
+  for (const [t, a] of [["Зеленський", "заїбав вже"], ["зеля", "заїбав вже"], ["шо там Зеленский", "заїбав вже"], ["ЗЕ", "заїбав вже"],
+    ["Порошенко", "найкращій президент"], ["порох", "найкращій президент"], ["Порох!", "найкращій президент"], ["Ющенко", "так"], ["а ющ?", "так"],
+    ["путін", "хуйло"], ["Путин", "хуйло"], ["моль", "хуйло"], ["моль бункерна", "хуйло"], ["бункерний", "хуйло"],
+    ["шо там Зеленський сьогодні наговорив по телевізору?", "заїбав вже"], ["а Порошенко знову про армію, мову й віру", "найкращій президент"],
+    ["бачила, шо Путін знову по телевізору?", "хуйло"], ["шо скажеш за Трампа і мита", "шизік"], ["згадала Ющенка з бджолами", "так"],
+    ["шо там Федоров з Дією?", "роль кібербезпеки трохи перебільшена"], ["Федорів", "роль кібербезпеки трохи перебільшена"],
+    ["а Федорову подобається?", "роль кібербезпеки трохи перебільшена"], ["Mykhailo Fedorov", "роль кібербезпеки трохи перебільшена"],
+    ["діджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["а діджея кликали?", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["ді-джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"],
+    ["ді джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["з діджеєм на весіллі", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["диджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["DJ", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"],
+    ["Бред Піт", "справжній мущина"], ["Бреда Піта", "справжній мущина"], ["Бред Пит", "справжній мущина"], ["Бредд Питт", "справжній мущина"],
+    ["Бред питт", "справжній мущина"], ["Брэд Питт", "справжній мущина"], ["бредпіт", "справжній мущина"], ["Brad Pitt", "справжній мущина"], ["а шо там Бредом Пітом у кіно?", "справжній мущина"], ["Трамп", "шизік"], ["трумп", "шизік"], ["рудий", "шизік"], ["рыжий", "шизік"]])
+    assert.equal(fixedReply(`@babtsya_z_altanky_bot ${t}`), a, t);
+  for (const t of ["зелений чай", "зерно", "ющик", "молоко", "мольберт", "трамвай", "шо по гороскопах?", "порох у пороховниці", "моль у шафі все поїла", "пороховий склад", "бред якийсь", "Піт з п'ятого поверху", "Олена Федорівна з третього", "дядько Федір", "джем з полуниці", "Джейн"]) assert.equal(fixedReply(`@babtsya_z_altanky_bot ${t}`), null, t);
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 13)?.key, "обід");
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 16), null);
   assert.equal(topicFor("@babtsya_z_altanky_bot і ще шоб про хахалєй сваїх розказувала", 18)?.key, "хахалі");
   assert.equal(topicFor("@babtsya_z_altanky_bot бабуля, шо по гороскопах?", 10)?.key, "гороскоп");
   assert.equal(topicFor("@babtsya_z_altanky_bot", 10), null);
   assert.equal(topicFor("@babtsya_z_altanky_bot ну шо скажеш", 10), null);
+  assert.ok(REPLY_TOPICS.every((t) => !/у колясочній|на акції в АТБ\)/.test(t.hint)));
   assert.ok(REPLY_MOVES.rude.length >= 10 && REPLY_MOVES.wise.length >= 20 && IMAGES.length >= 50);
+  assert.equal(tidy("всю душу обісрaли своїми новинами, Ivan M"), "всю душу обісрали своїми новинами, Ivan M");
+  assert.equal(tidy("був один, маеdеlkа така"), "був один, така");
+  assert.equal(applyFixes("Сінку, плітки — як жук.", "").text, "Синку, плітки — як жук.");
   assert.equal(dedupLoop("a\n".repeat(10) + "b"), "a\na\na");
   assert.deepEqual(lengthTarget(10), [600, 900]);
   assert.equal(splitChunks(Array(700).fill("x")).length, 3);

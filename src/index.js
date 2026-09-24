@@ -7,7 +7,7 @@ import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
   BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  GRUMBLE_SLOTS, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION } from "../poll.js";
 
@@ -178,10 +178,12 @@ async function grumble(env, now, forced, toGroup = false) {
   return `grumble ${section} (${recent ?? "після вижимки"} за 90 хв)${phrase === fallback ? " [з файлу]" : ""}: ${phrase}`;
 }
 
-const REPLY_TEMP = 0.8;
+const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2: funniest, still coherent
 
 // One reply, not sent: used by the live answer and by /run?kind=sample for comparing temperatures.
 async function compose(env, name, raw, botText, temperature = REPLY_TEMP) {
+  const fixed = fixedReply(raw); // "@бабця + surname": the user's own answer, no model
+  if (fixed) return { tone: "фраза", text: fixed };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   const image = pick(IMAGES);
   const tone = Math.random() < RUDE_SHARE ? "rude" : "wise";

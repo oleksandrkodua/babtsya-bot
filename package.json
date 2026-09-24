@@ -4,7 +4,6 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node src/pipeline.js && node poll.js",
-    "deploy": "./deploy.sh"
+    "test": "node src/pipeline.js && node poll.js"
   }
 }
