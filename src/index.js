@@ -6,7 +6,7 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, rollCall, dedupLoop, finalize, lengthTarget, messageText,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, rollCall, nightLine, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION } from "../poll.js";
@@ -241,7 +241,7 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   const [lo, hi] = lengthTarget(writerLines.length);
   // Past BIG_DAY the raw chat drowns the writer: it transcribes instead of writing.
   const chatPart = writerLines.length <= BIG_DAY ? header + writerChat : "не надано — день великий, пиши лише за планом; найкращі фрази в плані дослівні";
-  let play = await ai(env, writePrompt, `ОБРАЗ ДНЯ: ${IMAGES[Math.floor(Math.random() * IMAGES.length)]}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
+  let play = await ai(env, writePrompt, `ОБРАЗ ДНЯ: ${IMAGES[Math.floor(Math.random() * IMAGES.length)]}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${nightLine(writerLines)}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
   if (!play) return { error: "п'єса" };
 
   if (play.length > HARD_LIMIT) {

@@ -355,6 +355,25 @@ export function castClean(play, tags, names = []) {
 // Everyone who wrote but isn't named anywhere in the play gets a roll-call remark before the moral, so nobody
 // finds out they "wrote nothing today" ("А я сьогодні ніхуя не писав виходить", 24.09.2026). A name counts as present
 // if its part before a comma appears ("Iron Grey Owl" for "Iron Grey Owl, esquire").
+// Night 22:00–05:00 opens the midday window and gets its own first scene, or one remark if it was quiet (24.09.2026).
+// Only the leading run counts: 22:0x right before an evening digest is not "night".
+// ponytail: an evening skipped for <50 messages rolls its window into the next midday, and that night gets no scene.
+const NIGHT_SCENE_MIN = 10; // fewer night messages get one remark, not a scene (user, 24.09.2026)
+const NIGHT_TITLES = ["Нічна зміна", "Поки двір спав", "Безсоння біля АТБ", "Нічний парламент альтанки"];
+export function nightLine(lines) {
+  const night = [];
+  for (const l of lines) {
+    const h = Number(l.slice(1, 3));
+    if (!(h >= 22 || h < 5)) break;
+    night.push(l);
+  }
+  if (!night.length) return "";
+  const who = [...new Set(night.map((l) => l.match(/^\[\d\d:\d\d\] (.+?): /)?.[1]).filter(Boolean))].join(", ");
+  const head = `НІЧ: ${night.length} повідомлень ${night[0].slice(1, 6)}–${night.at(-1).slice(1, 6)}, учасники: ${who}.`;
+  return night.length < NIGHT_SCENE_MIN ? `${head} Без сцени — одна ремарка.`
+    : `${head} Перша сцена — «${NIGHT_TITLES[Math.floor(Math.random() * NIGHT_TITLES.length)]}».`;
+}
+
 export function rollCall(play, names) {
   const flat = nameKey(play);
   const missing = [...new Set(names)].filter((n) => !flat.includes(nameKey(n.split(",")[0])));
@@ -368,7 +387,7 @@ export function rollCall(play, names) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Температура|Хронологія|Чим закінчилось|Найкращі фрази)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -539,6 +558,12 @@ if (import.meta.main) {
     "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Pino Rhino.)\n\nМораль: ні.");
   assert.equal(rollCall(rcPlay, ["Ivan M"]), rcPlay);
   assert.ok(rollCall("Без моралі.", ["Nina"]).endsWith("(Також у дворі галасували: Nina.)"));
+  const nightChat = [...Array(10)].map((_, i) => `[2${2 + (i > 4)}:1${i % 5}] ${i % 2 ? "Nina" : "Ivan M"}: а`);
+  const night = nightLine([...nightChat, "[08:00] Lida: г", "[22:05] Lida: д"]);
+  assert.ok(night.startsWith("НІЧ: 10 повідомлень 22:10–23:14, учасники: Ivan M, Nina. Перша сцена — «"), night);
+  assert.ok(nightLine([...nightChat.slice(1), "[09:00] Lida: б"]).endsWith("Без сцени — одна ремарка."));
+  assert.equal(nightLine(["[13:00] Lida: а", "[22:05] Nina: б"]), "");
+  assert.equal(tidy("НІЧ: 3 повідомлень\nСцена"), "Сцена");
   const castTags = new Map([["Lida", "ковбаска"], ["Taras", "Ненажера"]]);
   assert.equal(castClean("Дійові особи:\nLida — ковбаска, яка знає ціну репутації;\nTaras — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена", castTags),
     "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера» — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена");
