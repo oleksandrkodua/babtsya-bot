@@ -1,0 +1,36 @@
+name = "babtsya-bot"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true # the webhook address: https://babtsya-bot.<your-subdomain>.workers.dev
+preview_urls = false
+
+# Every 30 min; the Worker itself decides by Kyiv time (13:00–16:00 midday, 22:00–23:00 evening,
+# grumbles every 90 min 08:00–21:30).
+[triggers]
+crons = ["0,30 * * * *"]
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "babtsya"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# Prompts are imported as text so the Worker uses the same files as the test stand.
+[[rules]]
+type = "Text"
+globs = ["**/*.txt"]
+fallthrough = true
+
+[vars]
+# Women in the group, by Telegram display name (a word of it is enough: "Nora" matches "Nora 🐸 Frog"); everyone else is a man.
+FEMALE_NAMES = "" # women in your group by display name, comma-separated
+GROUP_CHAT_ID = "-100XXXXXXXXXX" # your group id: DEPLOY.md, stages 2 and 6
+TEST_CHAT_ID = "0" # your private chat with the bot, for TEST_MODE = "1"
+TEST_MODE = "0" # 0 — вижимки йдуть у групу GROUP_CHAT_ID; 1 — тобі в особисті
+
+# Keep the Worker's console.log history (dashboard → babtsya-bot → Logs), 3 days on the free plan:
+# every grumble, digest, poll and reply is logged with its time, so "what did she post and when" has an answer.
+[observability]
+enabled = true

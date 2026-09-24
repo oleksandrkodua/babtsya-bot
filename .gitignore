@@ -1,0 +1,15 @@
+.DS_Store
+.wrangler/
+node_modules/
+.claude/
+.env
+.env.*
+.dev.vars
+
+# Secrets and real people's messages — never in history, even locally.
+*.rtf
+d1-*.json
+last-plan.json
+logs/last-plan-*.txt
+evidence/
+ChatExport*/
