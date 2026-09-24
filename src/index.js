@@ -6,14 +6,15 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, dedupLoop, finalize, lengthTarget, messageText,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, rollCall, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION } from "../poll.js";
 
 const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const WRITER_TEMP = 1.15; // chosen 23.09.2026 after A/B on the test stand
-const MIDDAY_MIN = 100; // ponytail: starting thresholds, tune on real traffic
+const MIDDAY_MIN = 50; // midday runs only at 13:00 Kyiv (24.09.2026: a 15:30 surprise play starved the evening one)
+const MIDDAY_MINUTE = 13 * 60; // ponytail: one shot, no retry — if it fails, the day rolls into the evening digest
 const EVENING_MIN = 50; // below it the evening is skipped and messages roll into the next digest
 const GRUMBLES = parseGrumbles(grumblesText);
 const POLL_MINUTE = 21 * 60; // «зрада чи перемога» at 21:00 Kyiv
@@ -80,7 +81,7 @@ export default {
     const pending = () => env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE ts < ?").bind(Math.floor(now / 1000)).first("n");
     const done = (kind) => env.DB.prepare("SELECT 1 FROM digests WHERE day = ? AND kind = ?").bind(day, kind).first();
     let posted = false;
-    if (hour >= 13 && hour <= 16 && !(await done("midday")) && (await pending()) >= MIDDAY_MIN) {
+    if (slotMinute(now) === MIDDAY_MINUTE && !(await done("midday")) && (await pending()) >= MIDDAY_MIN) {
       console.log(await digest(env, day, "midday"));
       posted = true;
     }
@@ -140,11 +141,11 @@ async function digest(env, day, kind, keep = false) {
   const lines = rows.map((r) => `[${new Date((r.ts + offset) * 1000).toISOString().slice(11, 16)}] ${r.name}: ${r.text}`);
   const tags = new Map(rows.filter((r) => r.tag).map((r) => [r.name, r.tag]));
   const header = genderLine(rows.map((r) => r.name), femaleSet(env.FEMALE_NAMES)) +
-    (tags.size ? `ПІДПИСИ УЧАСНИКІВ\n${[...tags].map(([n, t]) => `${n} — ${t}`).join("\n")}\n\n` : "");
+    (tags.size ? `ПІДПИСИ УЧАСНИКІВ\n${[...tags].map(([n, t]) => `${n} «${t}»`).join("\n")}\n\n` : "");
   const protectedTerms = [...new Set(rows.map((r) => r.name)), ...tags.values(), BOT_NAME];
   const prev = await env.DB.prepare("SELECT plan FROM digests WHERE plan IS NOT NULL ORDER BY created DESC LIMIT 1").first("plan");
 
-  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms);
+  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms, tags);
   const prefix = env.TEST_MODE === "1" ? `[ТЕСТ · ${kind} · ${rows.length} повідомлень]\n\n` : "";
 
   if (!play.text) {
@@ -223,7 +224,7 @@ async function newGrumble(env, section, list) {
   return text.length >= 15 && !list.includes(text) ? text.slice(0, 300) : "";
 }
 
-async function buildPlay(env, lines, header, context, protectedTerms) {
+async function buildPlay(env, lines, header, context, protectedTerms, tags = new Map()) {
   const intro = "Повідомлення групи «Альтанка біля АТБ»:\n\n";
   const parts = splitChunks(lines);
   const plans = [];
@@ -258,7 +259,8 @@ async function buildPlay(env, lines, header, context, protectedTerms) {
     play = warFallback(fixed.text, writerChat);
     console.log(`Війна: ${war.join(", ")}; застосовано ${fixed.applied.length}, відхилено ${fixed.rejected.length}; лишилось: ${warWords(play, writerChat).join(", ") || "—"}`, fix.slice(0, 500));
   }
-  return { text: finalize(castFix(play, protectedTerms.filter((t) => t !== BOT_NAME))), plan };
+  const senders = protectedTerms.filter((t) => t !== BOT_NAME && lines.some((l) => l.includes(`] ${t}: `)));
+  return { text: finalize(rollCall(castClean(castFix(play, senders), tags, senders), senders)), plan };
 }
 
 // One retry on an empty answer or an error (rate limit, "finish_reason: length"), per requirements.

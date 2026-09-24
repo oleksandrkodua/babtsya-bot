@@ -312,14 +312,57 @@ export function castFix(play, names) {
   if (start < 0) return play;
   const end = play.indexOf("\n\n", start);
   const block = play.slice(start, end < 0 ? undefined : end);
-  const cast = block.split("\n").slice(1).map((l) => l.split(" — ")[0].trim());
+  const cast = new Set(block.split("\n").slice(1).map((l) => nameKey(castName(l))));
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const missing = names.filter((n) => !cast.includes(n) && new RegExp(`^${esc(n)}(?: \\([^)\\n]*\\))?:`, "m").test(play));
+  const missing = names.filter((n) => !cast.has(nameKey(n)) && new RegExp(`^${esc(n)}(?: \\([^)\\n]*\\))?:`, "m").test(play));
   if (!missing.length) return play;
   const add = missing.map((n) => `${n} — голос із натовпу`).join("\n");
   const others = block.lastIndexOf("\nта інші");
   const fixed = others < 0 ? `${block}\n${add}` : `${block.slice(0, others)}\n${add}${block.slice(others)}`;
   return play.slice(0, start) + fixed + play.slice(start + block.length);
+}
+
+// «Дійові особи» line = "Name «tag» — role in today's story": the tag is the member's real one, put there by code;
+// the model writes only the role. "Lida — сарделька, яка знає ціну репутації" hurt (24.09.2026): if the role
+// still leans on the tag, it goes and "Name «tag»" stays. Matched by 5-letter stems of every tag word, since the
+// model inflects ("сардельку"); a tag without a 4+ letter word ("Нік2") is matched whole; "Тюлєчка, форшмак" is two
+// nicknames, any one counts. Title and scenes may play with tags — a joke.
+// The model drops commas and emoji from names ("Iron Grey Owl esquire", 24.09.2026): names are compared
+// without case, emoji and punctuation, and the cast gets the full name back.
+const nameKey = (s) => s.replace(EMOJI, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+const CAST_LINE = /^(.+?)(?:\s*«[^»\n]*»)?(?:\s[—–-]\s(.+))?$/;
+const castName = (l) => l.match(CAST_LINE)[1].replace(/;\s*$/, "").trim();
+const leansOnTag = (desc, tag) => tag.toLowerCase().split(",").some((t) => {
+  const words = t.match(/\p{L}+/gu) ?? [];
+  const stems = words.some((w) => w.length >= 4) ? words.map((w) => w.slice(0, 5)) : [t.trim()];
+  return stems.every((w) => desc.toLowerCase().includes(w));
+});
+export function castClean(play, tags, names = []) {
+  const start = play.indexOf("Дійові особи:");
+  if (start < 0) return play;
+  const real = new Map([...names, ...tags.keys()].map((n) => [nameKey(n), n]));
+  const end = play.indexOf("\n\n", start);
+  const block = play.slice(start, end < 0 ? undefined : end);
+  const fixed = block.split("\n").map((l) => {
+    const name = real.get(nameKey(castName(l))), desc = l.match(CAST_LINE)[2];
+    if (!name) return l;
+    const tag = tags.get(name);
+    return name + (tag ? ` «${tag}»` : "") + (desc && !(tag && leansOnTag(desc, tag)) ? ` — ${desc}` : "");
+  }).join("\n");
+  return play.slice(0, start) + fixed + play.slice(start + block.length);
+}
+
+// Everyone who wrote but isn't named anywhere in the play gets a roll-call remark before the moral, so nobody
+// finds out they "wrote nothing today" ("А я сьогодні ніхуя не писав виходить", 24.09.2026). A name counts as present
+// if its part before a comma appears ("Iron Grey Owl" for "Iron Grey Owl, esquire").
+export function rollCall(play, names) {
+  const flat = nameKey(play);
+  const missing = [...new Set(names)].filter((n) => !flat.includes(nameKey(n.split(",")[0])));
+  if (!missing.length) return play;
+  const who = missing.length > 12 ? `${missing.slice(0, 12).join(", ")} та ще ${missing.length - 12}` : missing.join(", ");
+  const line = `(Також у дворі галасували: ${who}.)`;
+  const moral = play.lastIndexOf("\nМораль");
+  return moral < 0 ? `${play.trimEnd()}\n\n${line}` : `${play.slice(0, moral).trimEnd()}\n\n${line}\n${play.slice(moral)}`;
 }
 
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
@@ -491,6 +534,29 @@ if (import.meta.main) {
   assert.equal(tidy("всю душу обісрaли своїми новинами, Ivan M"), "всю душу обісрали своїми новинами, Ivan M");
   assert.equal(tidy("був один, маеdеlkа така"), "був один, така");
   assert.equal(applyFixes("Сінку, плітки — як жук.", "").text, "Синку, плітки — як жук.");
+  const rcPlay = "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\nМораль: ні.";
+  assert.equal(rollCall(rcPlay, ["Ivan M", "Iron Grey Owl, esquire", "Pino Rhino", "Pino Rhino"]),
+    "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Pino Rhino.)\n\nМораль: ні.");
+  assert.equal(rollCall(rcPlay, ["Ivan M"]), rcPlay);
+  assert.ok(rollCall("Без моралі.", ["Nina"]).endsWith("(Також у дворі галасували: Nina.)"));
+  const castTags = new Map([["Lida", "ковбаска"], ["Taras", "Ненажера"]]);
+  assert.equal(castClean("Дійові особи:\nLida — ковбаска, яка знає ціну репутації;\nTaras — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена", castTags),
+    "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера» — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена");
+  // The model inflects the tag and swaps the dash; a two-word tag needs both stems ("Одеси" isn't "Одеський фінмон").
+  castTags.set("Nina", "Одеський фінмон").set("Petro", "Нік2").set("Hnat", "Пиріжок, форшмак");
+  assert.equal(castClean("Дійові особи:\nLida — ковбаску всі поважають\nTaras – Ненажера з принципами\nNina — пише з Одеси\nPetro — Нік2 дня\nHnat — пиріжок двору\n\nСцена", castTags),
+    "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера»\nNina «Одеський фінмон» — пише з Одеси\nPetro «Нік2»\nHnat «Пиріжок, форшмак»\n\nСцена");
+  // The model copies "Name «tag»" from ПІДПИСИ: no doubled tag, and castFix still sees the name.
+  const tagged = "Дійові особи:\nLida «ковбаска» — пекла пиріг\nTaras\n\nLida: Ну!";
+  assert.equal(castClean(tagged, castTags), "Дійові особи:\nLida «ковбаска» — пекла пиріг\nTaras «Ненажера»\n\nLida: Ну!");
+  assert.equal(castFix(tagged, ["Lida"]), tagged);
+  // Full Telegram name comes back whatever the model dropped; no duplicate in castFix, no false roll call.
+  const lossy = "Дійові особи:\nIron Grey Owl esquire — зберігав квитанції\nZina Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.";
+  const full = ["Iron Grey Owl, esquire", "Zina 🐸 Kit", "✙Petro Bez✙"];
+  assert.equal(castClean(lossy, new Map([["Iron Grey Owl, esquire", "Архіваріус"]]), full),
+    "Дійові особи:\nIron Grey Owl, esquire «Архіваріус» — зберігав квитанції\nZina 🐸 Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.");
+  assert.equal(castFix(lossy, ["Iron Grey Owl, esquire"]), lossy);
+  assert.equal(rollCall(lossy, ["✙Petro Bez✙"]), lossy);
   assert.equal(dedupLoop("a\n".repeat(10) + "b"), "a\na\na");
   assert.deepEqual(lengthTarget(10), [600, 900]);
   assert.equal(splitChunks(Array(700).fill("x")).length, 3);
