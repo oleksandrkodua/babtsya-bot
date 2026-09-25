@@ -196,7 +196,7 @@ export const REPLY_MOVES = {
 // the prompts' own examples. Code now picks the image, one per reply and one per play.
 export const IMAGES = [
   "черга в поліклініку", "пенсійний фонд", "базар на Виноградарі", "тролейбус без світла", "ремонт у сусіда зверху",
-  "кабачки й консервація на зиму", "Нова пошта й загублена посилка", "турецький серіал о сьомій", "акція в АТБ на ковбасу",
+  "Нова пошта й загублена посилка", "турецький серіал о сьомій", "акція в АТБ на ковбасу",
   "дача й колорадські жуки", "ліфт, що застряг між поверхами", "лічильник за воду", "сусідський кіт", "лавка біля під'їзду",
   "батареї, які не гріють", "шлюб у РАЦСі в дев'яностих", "тиск і тонометр", "бабусин сервант із кришталем",
   "килим на стіні", "олів'є на Новий рік", "трилітрова банка з огірками", "радіоточка на кухні", "черга за хлібом",
@@ -258,6 +258,9 @@ export const REPLY_TOPICS = [
     hint: "Тема — гроші й пенсія: побурчи про ціни, пенсію й комуналку — з одним абсурдним розрахунком." },
   { key: "здоров'я", re: W("тиск|лікар|таблет|здоров|болить|аптек|поліклін|хвор"),
     hint: "Тема — здоров'я бабці: розкажи про свій тиск, коліна чи таблетки — як про подвиг. Про здоров'я автора не жартуй." },
+  // Before "порада" and "плітки" ("порадуйте", "розкажи"): "розкажіть шось хороше" (25.09.2026) — Ukrainian and Russian: хороше/хорошее, приємне/приятное, порадуйте, втіште/утешьте…
+  { key: "хороше", re: W("хорош|приємн|приятн|позитив|радіс|радост|порадуй|порадувати|порадовать|втіш|утеш|потіш|тепле|тепл[оеі]го|добре слово|доброе слово|(?:щось|шось|що-небудь|что-то|чтото|что-нибудь|шото) добр"),
+    hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном." },
   { key: "порада", re: W("порад|що робити|шо робити|як бути|підкажи|посовітуй|допоможи"),
     hint: "Тема — порада: дай життєву пораду з досвіду бабці — корисну, але смішну." },
   { key: "плітки", re: W("пліт|новин|що нового|шо нового|розкажи|хто там"),
@@ -413,6 +416,23 @@ export function rollCall(play, names) {
   return beforeMoral(play, `(Також у дворі галасували: ${who}.)`);
 }
 
+// The reply judge answers "2 8" — best draft and its score 1–10. Garbage picks the first draft and counts as
+// good, so a confused judge never costs a second round.
+export function parseVote(text, n) {
+  const [k, score] = (text.match(/\d+/g) ?? []).map(Number);
+  return { best: k >= 1 && k <= n ? k - 1 : 0, score: score ?? 10 };
+}
+
+// The picture committee: three single-number answers (appetizing, realistic, flawless), averaged to one decimal.
+// Garbage answers don't vote; no valid vote at all → null, and the picture isn't stocked.
+export function committeeScore(answers) {
+  const votes = answers.map((a) => Number(String(a).match(/\d+/)?.[0])).filter((n) => n >= 1 && n <= 10);
+  return votes.length ? Math.round((votes.reduce((s, n) => s + n, 0) / votes.length) * 10) / 10 : null;
+}
+
+// The play's «title» line, for the evening poster's caption.
+export const playTitle = (play) => play.match(/^«[^\n]+»$/m)?.[0] ?? "";
+
 // Code-made remarks (roll call, poll verdict) go right before the moral.
 export function beforeMoral(play, line) {
   const moral = play.lastIndexOf("\nМораль");
@@ -443,7 +463,7 @@ export function copiedLines(play, chat, n = 6) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|РОЗБІР|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -467,6 +487,9 @@ const fixMixed = (t) => t.replace(/\p{L}+/gu, (w) => {
 
 // Everything the model writes goes through this before Telegram: no pings, no placeholders, no service labels,
 // no foreign scripts.
+// A stuttered function word ("наче той кіт, що, що у шматочок", 25.09.2026) — the model's glitch, never style.
+// ponytail: only short function words; an emphatic "так, так" or "ну-ну" stays.
+const STUTTER = /(?<![\p{L}])(що|як|і|й|в|у|на|з|до|та|не|це|бо|же)(?:,?\s+\1)+(?![\p{L}])/giu;
 export const tidy = (text) =>
   SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
@@ -475,7 +498,7 @@ export const tidy = (text) =>
       .replace(SERVICE_LINE, ""),
   )
     // Letters of other scripts ("дешевимกาแฟ" — Thai for coffee, 24.09.2026) are dropped; only Cyrillic and Latin stay.
-    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
+    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(STUTTER, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
 
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
@@ -616,10 +639,16 @@ if (import.meta.main) {
   assert.equal(topicFor("@babtsya_z_altanky_bot і ще шоб про хахалєй сваїх розказувала", 18)?.key, "хахалі");
   assert.equal(topicFor("@babtsya_z_altanky_bot бабуля, шо по гороскопах?", 10)?.key, "гороскоп");
   assert.equal(topicFor("@babtsya_z_altanky_bot", 10), null);
+  assert.equal(topicFor("@babtsya_z_altanky_bot розкажіть шось хороше", 10)?.key, "хороше");
+  assert.equal(topicFor("@babtsya_z_altanky_bot расскажи что-то хорошее", 22)?.key, "хороше");
+  assert.equal(topicFor("@babtsya_z_altanky_bot порадуйте нас хоч чимось", 9)?.key, "хороше");
+  assert.equal(topicFor("@babtsya_z_altanky_bot скажи щось добре", 9)?.key, "хороше");
+  assert.equal(topicFor("@babtsya_z_altanky_bot розкажи плітки", 9)?.key, "плітки");
   assert.equal(topicFor("@babtsya_z_altanky_bot ну шо скажеш", 10), null);
   assert.ok(REPLY_TOPICS.every((t) => !/у колясочній|на акції в АТБ\)/.test(t.hint)));
   assert.ok(REPLY_MOVES.rude.length >= 10 && REPLY_MOVES.wise.length >= 20 && IMAGES.length >= 50);
   assert.equal(tidy("всю душу обісрaли своїми новинами, Ivan M"), "всю душу обісрали своїми новинами, Ivan M");
+  assert.equal(tidy("наче той кіт, що, що у шматочок, так, так, не не буде"), "наче той кіт, що у шматочок, так, так, не буде");
   assert.equal(tidy("був один, маеdеlkа така"), "був один, така");
   assert.equal(applyFixes("Сінку, плітки — як жук.", "").text, "Синку, плітки — як жук.");
   const rcPlay = "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\nМораль: ні.";
@@ -658,6 +687,16 @@ if (import.meta.main) {
   assert.deepEqual(copiedLines(copyPlay, chatNews), ["Ivan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!"]);
   assert.equal(applyFixes("Ivan M: було так", "було так => якщо так, то (сердито) інакше", { maxOld: 400, maxNew: 400, hedging: null }).text, "Ivan M: якщо так, то (сердито) інакше");
   assert.equal(tidy("РОЗМОВА ПЕРЕД ЦИМ:\nНу"), "Ну");
+  assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
+  assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
+  assert.deepEqual(parseVote("Варіант 3, оцінка 5", 3), { best: 2, score: 5 });
+  assert.deepEqual(parseVote("найкращий 7", 3), { best: 0, score: 10 });
+  assert.deepEqual(parseVote("", 3), { best: 0, score: 10 });
+  assert.equal(playTitle("Бабця з альтанки представляє\n\n«Безсоння біля АТБ»\nП'єса на одну дію"), "«Безсоння біля АТБ»");
+  assert.equal(playTitle("без назви"), "");
+  assert.equal(committeeScore(["7", "8.", "Score: 9"]), 8);
+  assert.equal(committeeScore(["3", "не знаю", "10"]), 6.5);
+  assert.equal(committeeScore(["", "0", "11"]), null);
   assert.equal(stageHead("«Назва»\n\nДійові особи:\nA — а\n\n(Сцена 1. Нічна дифузія мозку. Темно.)\nA: Ну!", "сусідський кіт", "Нічна зміна"),
     "«Назва»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці біля АТБ. Образ дня — сусідський кіт.\n\n(Сцена 1. Нічна зміна. Темно.)\nA: Ну!");
   const staged = "«Н»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці. Кіт.\n\n(Сцена 1. Ранок.)";

@@ -6,7 +6,7 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, parseVote, playTitle, committeeScore, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -21,8 +21,28 @@ const POLL_MINUTE = 21 * 60; // «зрада чи перемога» at 21:00 Ky
 const COPY_MAX = 2; // more copied replicas than this → one rewrite call (25.09.2026)
 // Second corrector pass on plays only: the first one kept missing agreement and the vocative (25.09.2026).
 const AGREE_PASS = "\n\nЦе другий прохід: перший коректор уже працював. Шукай ЛИШЕ порушення узгодження роду, числа й відмінка та звертання не в кличному відмінку. Решту не чіпай; якщо таких помилок нема — НЕМАЄ.";
-const REPLY_DRAFTS = 3; // best of three, a judge call picks the funniest on-topic one (25.09.2026)
-const JUDGE = "Ти — редактор гумору. Тобі дають розмову в сусідському чаті, повідомлення до бабці й кілька варіантів її відповіді. Обери варіант, який найсмішніший, стосується сказаного й розмови, не пояснює жарт і не повторює слів автора. Відповідай лише номером варіанта.";
+// A tag reply (25.09.2026, "more neurons for funnier, on-topic answers"): a brief of the conversation → 3 drafts →
+// a judge scores them → a weak best (< REPLY_GOOD) gets one more round with the judge's pick as the bar → corrector.
+const REPLY_DRAFTS = 3;
+const REPLY_GOOD = 7; // judge score 1–10
+// waitUntil lives ~30 s after the webhook answer (25.09.2026: two tags got no reply, the chain runs 10–20 s):
+// a second round only if the first took < 10 s, the corrector only if < 22 s have passed, model retries after 2 s.
+const REPLY_BUDGET_MS = 10000;
+const REPLY_DEADLINE_MS = 22000;
+const REPLY_PAUSE_MS = 2000;
+const BRIEF = "Ти — уважна сусідка, що стежить за чатом. Тобі дають розмову в сусідському чаті й повідомлення до бабці. Напиши для бабці розбір — три короткі рядки, сухо, без жартів:\n1. Про що зараз розмова.\n2. Чого автор хоче від бабці (питання, підколка, прохання) і про кого йдеться: один чоловік, одна жінка чи кілька людей; прізвиська розшифруй.\n3. Конкретний смішний кут: деталь, протиріччя чи абсурд, за який бабці зачепитися (не повторюй питання).\nНічого не вигадуй — лише те, що є в розмові.";
+const JUDGE = "Ти — редактор гумору. Тобі дають розмову в сусідському чаті, повідомлення до бабці й кілька варіантів її відповіді. Оціни кожен від 1 до 10: насамперед смішно й несподівано; далі — по суті того, що спитали, і в тему розмови; правильна граматика й рід; без вигаданих фактів про реальних людей; без повторів слів і без пояснення жарту; заїжджений образ (банки, огірки, соління, голуби, ЖЕК), якого нема в розмові, — мінус три бали. Відповідай одним рядком: номер найкращого варіанта й його оцінка, наприклад «2 8». Нічого більше.";
+// Pictures (25.09.2026): a poster before the evening play, a meat photo with the Lida tease. FLUX.1 schnell on
+// Workers AI, ~60 neurons a picture by Cloudflare's price list. No text in the picture (the model garbles letters),
+// no real people — the caption carries the words.
+const IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+const POSTER = "Ти пишеш опис картинки-афіші до вечірньої п'єси сусідського чату для генератора зображень. За назвою п'єси опиши АНГЛІЙСЬКОЮ одним-двома реченнями одну смішну, абсурдну сцену за її мотивами: двір панельного будинку, альтанка біля супермаркету, лавка, бурчлива бабця-оповідачка, сусіди — без конкретних облич. Весело й яскраво, без похмурих чи загрозливих фігур. Без реальних людей і імен, без тексту й літер на картинці, без війни й зброї. Лише опис англійською, нічого більше.";
+// Style goes first: FLUX weighs the start of the prompt most, and a trailing "gouache poster" came out as a dark photo (25.09.2026).
+const POSTER_STYLE = "Bright naive folk-art illustration, flat vivid colors, thick outlines, humorous cartoon, cheerful warm light. ";
+const POSTER_END = " No text, no letters, no signs.";
+const MEATS = ["juicy shashlik on metal skewers over glowing coals", "a huge smoked pork knuckle", "sizzling sausages on a grill",
+  "a thick ribeye steak on a wooden board", "a plate of homemade cutlets with fried onions", "Ukrainian salo — thick slices of white cured pork fat with a thin meat layer, garlic and rye bread"];
+const oneOf = (list) => list[Math.floor(Math.random() * list.length)];
 const STUB = `${BOT_NAME} сьогодні охрипла й мовчить. Завтра розкаже вдвічі більше.`;
 
 export default {
@@ -67,14 +87,25 @@ export default {
         const out = [];
         for (const t of temps) for (let i = 0; i < n; i++) {
           const r = await compose(env, name, text, "", t);
-          out.push(`t=${t} (${r.tone}): ${r.text || "—"}`);
+          out.push(`t=${t} (${r.tone}, оцінка ${r.score ?? "—"}): ${r.text || "—"}${r.brief ? `\n   розбір: ${r.brief.replace(/\n+/g, " | ")}` : ""}`);
         }
         return new Response(out.join("\n"));
       }
       // ?kind=poll[&to=group] — one poll now, same as the 21:00 one.
       if (kind === "poll") return new Response(await poll(env, toGroup));
+      // ?kind=stock — one more scored meat picture into the stock (D1 only, no chat).
+      if (kind === "stock") return new Response(await stockMeat(env));
+      // ?kind=poster[&title=«…»][&to=me] and ?kind=tease[&to=me] — one picture now; to=me goes to your private chat.
+      if (kind === "poster" || kind === "tease") {
+        const chat = url.searchParams.get("to") === "me" ? env.TEST_CHAT_ID : target(env, toGroup);
+        return new Response(kind === "tease" ? await tease(env, chat)
+          : await poster(env, chat, url.searchParams.get("title") || "«Бляха-муха, монстр у системі та холодильники з благословенням»"));
+      }
       const { day } = kyiv(new Date());
       // &keep=1 — a preview: messages stay in the base and the digest isn't recorded, so the real one still covers the day.
+      // Only an explicit manual digest reaches the group: an unknown kind (kind=judgepic before its deploy) once fell
+      // through here, posted a play into the group and ate 101 messages of the evening one (25.09.2026).
+      if (kind !== "manual") return new Response(`невідомий kind=${kind} — нічого не зроблено`, { status: 400 });
       return new Response(await digest(env, day, kind, url.searchParams.get("keep") === "1"));
     }
     return new Response(BOT_NAME);
@@ -100,9 +131,11 @@ export default {
     const afterMidday = m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1] && (await done("midday"));
     if (!posted && !afterMidday && GRUMBLE_SLOTS.includes(m)) console.log(await grumble(env, now));
     if (slotMinute(now) === neighbourMinute(day)) console.log(await grumble(env, now, "сусід"));
-    if (env.TEASE && slotMinute(now) === teaseMinute(day)) {
-      await telegram(env, "sendMessage", { chat_id: target(env), text: env.TEASE });
-      console.log(`tease: ${env.TEASE}`);
+    if (env.TEASE && slotMinute(now) === teaseMinute(day)) console.log(await tease(env, target(env)).catch((e) => `tease: ${e.message}`));
+    // Night refill after the 03:00 neuron reset: one picture per tick 04:00–05:30 while the stock is short.
+    if (env.TEASE && m >= 240 && m <= 330) {
+      const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM pics WHERE kind = 'meat' AND used IS NULL").first("n").catch(() => STOCK_MIN);
+      if (left < STOCK_MIN) console.log(await stockMeat(env).catch((e) => `stock: ${e.message}`));
     }
     if (slotMinute(now) === POLL_MINUTE) console.log(await poll(env));
   },
@@ -167,6 +200,9 @@ async function digest(env, day, kind, keep = false) {
     await env.DB.prepare("INSERT OR REPLACE INTO digests (day, kind, plan, created) VALUES (?, ?, NULL, ?)").bind(day, kind, runStart).run();
     return `${kind}: заглушка (${play.error})`;
   }
+  const title = playTitle(play.text);
+  // A poster before both scheduled plays (user, 25.09.2026); a manual preview stays text only.
+  if ((kind === "evening" || kind === "midday") && title) console.log(await poster(env, target(env), title, kind).catch((e) => `poster: ${e.message}`));
   await telegram(env, "sendMessage", { chat_id: target(env), text: prefix + play.text });
   if (keep) return `${kind}: ${rows.length} повідомлень → ${play.text.length} символів (попередній перегляд, база не чіпалась)`;
   // Only messages that went into this digest are deleted; ones that arrived meanwhile wait for the next.
@@ -199,36 +235,56 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   const fixed = fixedReply(raw); // "@бабця + surname": the user's own answer, no model
   if (fixed) return { tone: "фраза", text: fixed };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  const tone = Math.random() < RUDE_SHARE ? "rude" : "wise";
   const topic = topicFor(raw, kyiv(new Date()).hour); // "@бабця + word": a matching topic replaces the random move
+  const tone = topic?.key !== "хороше" && Math.random() < RUDE_SHARE ? "rude" : "wise"; // "something good" is never rude
   const who = isFemale(name, femaleSet(env.FEMALE_NAMES)) ? "Автор — жінка: жіночий рід, «доню»." : "Автор — чоловік: чоловічий рід, «синку».";
-  const talk = context ? `РОЗМОВА ПЕРЕД ЦИМ (лише щоб зрозуміти, про що мова):\n${context}\n\n` : "";
+  // Who in the conversation is a woman, so a mentioned member gets the right gender and case (25.09.2026).
+  const gender = genderLine([name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean), femaleSet(env.FEMALE_NAMES));
+  const talk = `${gender}${context ? `РОЗМОВА ПЕРЕД ЦИМ (лише щоб зрозуміти, про що мова):\n${context}\n\n` : ""}`;
   const asked = `${name} пише: «${raw.slice(0, 500) || "(без тексту — гіфка, стікер чи фото)"}»${botText ? `\n(це відповідь на твоє: «${botText.slice(0, 300)}»)` : ""}`;
-  // Same tone for all drafts (the rude/wise ratio holds), a different move and image each — that's the variety.
-  const draft = async () => {
+  const start = Date.now();
+  // 1. What's going on, what's asked, who's who ("джимбо" is one man) — the drafts answer the brief, not raw lines.
+  const local = replyPrompt.match(/^Місцеві слова:.*$/m)?.[0] ?? "";
+  // Always, not only with chat context: a bare "чи женимо джимбо?" got a generic threat instead of an answer (25.09.2026).
+  const brief = (await ai(env, `${BRIEF}\n${local}`, `${talk}${asked}`, 0.2, 250, REPLY_PAUSE_MS)).trim();
+  const ctx = `${talk}${brief ? `РОЗБІР (для тебе, у відповідь не переписуй):\n${brief}\n\n` : ""}`;
+  // 2. Same tone for all drafts (the rude/wise ratio holds), a different move and image each — that's the variety.
+  const draft = async (bar = "") => {
     const image = pick(IMAGES);
-    const said = await ai(env, replyPrompt, `${talk}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${who} ${REPLY_TONES[tone]} ${topic ? topic.hint : pick(REPLY_MOVES[tone])} Порівняння бери з теми «${image}».)`, temperature, 200);
+    const said = await ai(env, replyPrompt, `${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${who} ${REPLY_TONES[tone]} ${topic ? topic.hint : pick(REPLY_MOVES[tone])} Порівняння бери з теми «${image}».${bar})`, temperature, 200, REPLY_PAUSE_MS);
     return said ? tidy(warFallback(stripHints(said.trim(), image).replace(/^[«"]+|[»"]+$/g, ""), raw)) : "";
   };
-  const drafts = (await Promise.all(Array.from({ length: REPLY_DRAFTS }, draft))).filter(Boolean);
-  if (!drafts.length) return { tone: topic?.key || tone, text: "" };
-  let best = 0;
-  if (drafts.length > 1) {
-    const vote = await ai(env, JUDGE, `${talk}${asked}\n\nВаріанти:\n${drafts.map((d, i) => `${i + 1}. ${d}`).join("\n")}`, 0.2, 5);
-    best = Math.max(0, Math.min(drafts.length - 1, (Number(vote.match(/\d/)?.[0]) || 1) - 1));
+  const drafts = async (bar) => (await Promise.all(Array.from({ length: REPLY_DRAFTS }, () => draft(bar)))).filter(Boolean);
+  // 3. The judge scores; a single draft is taken as is.
+  const judge = async (list) => list.length < 2 ? { best: 0, score: 10 }
+    : parseVote(await ai(env, JUDGE, `${ctx}${asked}\n\nВаріанти:\n${list.map((d, i) => `${i + 1}. ${d}`).join("\n")}`, 0.2, 8, REPLY_PAUSE_MS), list.length);
+  let pool = await drafts();
+  if (!pool.length) return { tone: topic?.key || tone, text: "" };
+  let { best, score } = await judge(pool);
+  const first = score;
+  if (score < REPLY_GOOD && Date.now() - start < REPLY_BUDGET_MS) {
+    const more = await drafts(` Попередній найкращий варіант слабкий: «${pool[best]}». Зроби смішніше, точніше по суті й коротше, іншим ходом.`);
+    pool = [pool[best], ...more];
+    ({ best, score } = await judge(pool));
   }
-  let text = drafts[best];
+  console.log(`Відповідь ${name}: розбір ${brief ? "є" : "—"}, оцінка ${first}${pool.length > REPLY_DRAFTS ? ` → другий раунд ${score}` : ""}, ${Date.now() - start} мс`);
+  let text = pool[best];
   // Same corrector as the plays: replies went straight out and "той розписка" got caught by the group (24.09.2026).
-  text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, text, 0.2, 300)), { protectedTerms: [name, BOT_NAME] }).text;
-  return { tone: topic?.key || tone, text: dropName(text, name).slice(0, 500) };
+  if (Date.now() - start < REPLY_DEADLINE_MS)
+    text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, gender + text, 0.2, 300, REPLY_PAUSE_MS)), { protectedTerms: [name, BOT_NAME] }).text;
+  return { tone: topic?.key || tone, text: dropName(text, name).slice(0, 500), brief, score };
 }
 
 async function answer(env, msg, name, raw, botText) {
-  // The last dozen messages, so she answers the conversation and not just the one line (25.09.2026).
+  // The last 20 messages, so she answers the conversation and not just the one line (25.09.2026).
   // ponytail: right after a play the table is emptied and there's little context until people write again.
-  const { results } = await env.DB.prepare("SELECT name, text FROM messages WHERE message_id != ? ORDER BY ts DESC LIMIT 12").bind(msg.message_id).all();
+  const { results } = await env.DB.prepare("SELECT name, text FROM messages WHERE message_id != ? ORDER BY ts DESC LIMIT 20").bind(msg.message_id).all();
   const context = results.reverse().map((r) => `${displayName(r.name)}: ${r.text}`).join("\n");
-  const { tone, text } = await compose(env, name, raw, botText, REPLY_TEMP, context);
+  // "Бабця з альтанки друкує…" while the chain runs; Telegram shows it for ~5 s, so it's renewed.
+  const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: "typing" }).catch(() => {});
+  typing();
+  const tick = setInterval(typing, 4500);
+  const { tone, text } = await compose(env, name, raw, botText, REPLY_TEMP, context).finally(() => clearInterval(tick));
   if (!text) return console.log(`Відповідь ${name}: порожньо (модель нічого не дала)`);
   await telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id } })
     .then(() => console.log(`Відповідь ${name} (${tone}): ${text}`), (e) => console.log("Відповідь:", e.message));
@@ -306,7 +362,7 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     console.log(`Переказ: скопійовано ${copied.length}, переписано ${r.applied.length}, відхилено ${r.rejected.length}`);
   }
   for (const [pass, prompt, tokens] of [["Коректор", polishPrompt, 900], ["Узгодження", polishPrompt + AGREE_PASS, 600]]) {
-    const polished = applyFixes(play, dedupLoop(await ai(env, prompt, play, 0.2, tokens)), { protectedTerms });
+    const polished = applyFixes(play, dedupLoop(await ai(env, prompt, (header.match(/^СТАТЬ:.*\n\n/)?.[0] ?? "") + play, 0.2, tokens)), { protectedTerms });
     console.log(`${pass}: застосовано ${polished.applied.length}, відхилено ${polished.rejected.length}`, polished.rejected);
     play = polished.text;
   }
@@ -324,7 +380,7 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
 }
 
 // One retry on an empty answer or an error (rate limit, "finish_reason: length"), per requirements.
-async function ai(env, system, user, temperature, max_tokens = 6000) {
+async function ai(env, system, user, temperature, max_tokens = 6000, pause = 20000) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await env.AI.run(MODEL, {
@@ -336,10 +392,92 @@ async function ai(env, system, user, temperature, max_tokens = 6000) {
       if (text) return text;
     } catch (e) {
       console.log("AI:", e.message);
-      await new Promise((ok) => setTimeout(ok, 20000));
+      await new Promise((ok) => setTimeout(ok, pause));
     }
   }
   return "";
+}
+
+// A picture as base64 JPEG, or null — a failed picture never blocks the text it goes with.
+async function draw64(env, prompt) {
+  try {
+    return (await env.AI.run(IMAGE_MODEL, { prompt, steps: 4 }))?.image || null;
+  } catch (e) {
+    console.log("draw:", e.message);
+    return null;
+  }
+}
+const jpegBytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+const draw = async (env, prompt) => {
+  const b64 = await draw64(env, prompt);
+  return b64 ? jpegBytes(b64) : null;
+};
+
+// The committee (25.09.2026 spike: of four vision models only our Gemma 4 could see the picture, 1.2 s, within the
+// CPU limit). Three questions in parallel, each "only the number"; the stock keeps the average.
+// First real batch (25.09.2026 15:45): "realistic" gave 3 to every picture (it sees they're generated) and "flaws"
+// 3–4 to clean ones — constant penalties, no ranking. Only "appetizing" told pictures apart, so all three ask that.
+const COMMITTEE = [
+  "How appetizing does this food look? Answer with only a number from 1 to 10.",
+  "Would a hungry person want to eat this right now? Answer with only a number from 1 to 10.",
+  "As a picture to tease a friend who is always eating: how tasty and eye-catching is it? Answer with only a number from 1 to 10.",
+];
+const STOCK_MIN = 3; // fewer unused meat pictures than this → the night refill adds one per tick 04:00–05:30
+async function committee(env, b64) {
+  const ask = (q) => env.AI.run(MODEL, {
+    messages: [{ role: "user", content: [{ type: "text", text: q }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } }] }],
+    max_tokens: 10, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
+  }).then((r) => r?.response || r?.choices?.[0]?.message?.content || "", () => "");
+  const answers = await Promise.all(COMMITTEE.map(ask));
+  return { score: committeeScore(answers), answers };
+}
+
+// One meat picture into the stock: drawn, scored, kept in D1 as base64 until the tease sends it. Nothing goes to
+// any chat (25.09.2026: "мені в особисті вже нічого не має слати").
+async function stockMeat(env) {
+  const b64 = await draw64(env, `${oneOf(MEATS)}, appetizing close-up food photo, rustic kitchen table, warm light, no text.`);
+  if (!b64) return "stock: картинка не намалювалась";
+  const { score, answers } = await committee(env, b64);
+  if (score == null) return `stock: комітет не відповів (${answers.join(" / ")})`;
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO pics (file_id, kind, score, created, data) VALUES (?, 'meat', ?, ?, ?)").bind(`pic-${Date.now()}`, score, now, b64).run();
+  return `stock: ${score} (${answers.map((x) => x.trim()).join(" / ")})`;
+}
+
+async function sendPhoto(env, chat, jpeg, caption, silent = false) {
+  const form = new FormData();
+  form.append("chat_id", String(chat));
+  if (silent) form.append("disable_notification", "true");
+  form.append("caption", caption.slice(0, 1024)); // Telegram's caption limit
+  form.append("photo", new Blob([jpeg], { type: "image/jpeg" }), "babtsya.jpg");
+  const json = await (await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, { method: "POST", body: form })).json();
+  if (!json.ok) throw new Error(`Telegram sendPhoto: ${json.description}`); // never log the URL: it holds the token
+  return json.result;
+}
+
+// Evening poster: Gemma turns the title into an English scene, FLUX draws it, the title goes in the caption.
+async function poster(env, chat, title, kind = "evening") {
+  const scene = (await ai(env, POSTER, `Назва п'єси: ${title}`, 0.9, 150)).trim();
+  const jpeg = scene ? await draw(env, POSTER_STYLE + scene + POSTER_END) : null;
+  if (!jpeg) return "poster: без картинки";
+  await sendPhoto(env, chat, jpeg, `Сьогодні ${kind === "midday" ? "вдень" : "ввечері"} на альтанці:\n${title}`);
+  return `poster: ${scene}`;
+}
+
+// The Lida tease with a meat photo; if the picture fails, the words still go.
+async function tease(env, chat) {
+  const best = await env.DB.prepare("SELECT file_id, score, data FROM pics WHERE kind = 'meat' AND used IS NULL ORDER BY score DESC LIMIT 1").first();
+  if (best) {
+    if (best.data) await sendPhoto(env, chat, jpegBytes(best.data), env.TEASE);
+    else await telegram(env, "sendPhoto", { chat_id: chat, photo: best.file_id, caption: env.TEASE }); // first-day rows
+    // A preview in your private chat doesn't spend the stock; a sent picture's bytes are dropped.
+    if (String(chat) !== String(env.TEST_CHAT_ID)) await env.DB.prepare("UPDATE pics SET used = ?, data = NULL WHERE file_id = ?").bind(Math.floor(Date.now() / 1000), best.file_id).run();
+    return `tease із запасу (${best.score}): ${env.TEASE}`;
+  }
+  const jpeg = await draw(env, `${oneOf(MEATS)}, appetizing close-up food photo, rustic kitchen table, warm light, no text.`);
+  if (jpeg) await sendPhoto(env, chat, jpeg, env.TEASE);
+  else await telegram(env, "sendMessage", { chat_id: chat, text: env.TEASE });
+  return `tease${jpeg ? " з картинкою" : ""}: ${env.TEASE}`;
 }
 
 // TEST_MODE sends everything to the private chat; toGroup overrides it for a one-off post.
