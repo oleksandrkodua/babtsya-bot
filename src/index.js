@@ -6,10 +6,10 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, rollCall, nightLine, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
-import { OPTIONS, QUESTION } from "../poll.js";
+import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
 const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const WRITER_TEMP = 1.15; // chosen 23.09.2026 after A/B on the test stand
@@ -18,6 +18,11 @@ const MIDDAY_MINUTE = 13 * 60; // ponytail: one shot, no retry — if it fails, 
 const EVENING_MIN = 50; // below it the evening is skipped and messages roll into the next digest
 const GRUMBLES = parseGrumbles(grumblesText);
 const POLL_MINUTE = 21 * 60; // «зрада чи перемога» at 21:00 Kyiv
+const COPY_MAX = 2; // more copied replicas than this → one rewrite call (25.09.2026)
+// Second corrector pass on plays only: the first one kept missing agreement and the vocative (25.09.2026).
+const AGREE_PASS = "\n\nЦе другий прохід: перший коректор уже працював. Шукай ЛИШЕ порушення узгодження роду, числа й відмінка та звертання не в кличному відмінку. Решту не чіпай; якщо таких помилок нема — НЕМАЄ.";
+const REPLY_DRAFTS = 3; // best of three, a judge call picks the funniest on-topic one (25.09.2026)
+const JUDGE = "Ти — редактор гумору. Тобі дають розмову в сусідському чаті, повідомлення до бабці й кілька варіантів її відповіді. Обери варіант, який найсмішніший, стосується сказаного й розмови, не пояснює жарт і не повторює слів автора. Відповідай лише номером варіанта.";
 const STUB = `${BOT_NAME} сьогодні охрипла й мовчить. Завтра розкаже вдвічі більше.`;
 
 export default {
@@ -85,13 +90,20 @@ export default {
       console.log(await digest(env, day, "midday"));
       posted = true;
     }
+    if (hour >= 22) await closePoll(env, day).catch((e) => console.log("poll close:", e.message));
     if (hour >= 22 && !(await done("evening")) && (await pending()) >= EVENING_MIN) {
       console.log(await digest(env, day, "evening"));
       posted = true;
     }
     // A grumble right under a fresh digest would bury it.
-    if (!posted && GRUMBLE_SLOTS.includes(slotMinute(now))) console.log(await grumble(env, now));
+    const m = slotMinute(now);
+    const afterMidday = m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1] && (await done("midday"));
+    if (!posted && !afterMidday && GRUMBLE_SLOTS.includes(m)) console.log(await grumble(env, now));
     if (slotMinute(now) === neighbourMinute(day)) console.log(await grumble(env, now, "сусід"));
+    if (env.TEASE && slotMinute(now) === teaseMinute(day)) {
+      await telegram(env, "sendMessage", { chat_id: target(env), text: env.TEASE });
+      console.log(`tease: ${env.TEASE}`);
+    }
     if (slotMinute(now) === POLL_MINUTE) console.log(await poll(env));
   },
 };
@@ -106,7 +118,7 @@ async function ingest(env, update, ctx) {
     return;
   }
   const raw = msg.text || msg.caption || "";
-  const who = (m) => (m.sender_chat?.id === m.chat?.id ? "Адмін групи" : m.sender_chat?.title) || [m.from?.first_name, m.from?.last_name].filter(Boolean).join(" ") || "Хтось";
+  const who = (m) => displayName((m.sender_chat?.id === m.chat?.id ? "Адмін групи" : m.sender_chat?.title) || [m.from?.first_name, m.from?.last_name].filter(Boolean).join(" ") || "Хтось");
   const name = who(msg);
   // Remember name → user id for real tags; the author of a replied-to message counts too. Never blocks storing.
   const seen = [msg, msg.reply_to_message].filter((m) => m?.from && !m.from.is_bot && !m.sender_chat);
@@ -133,7 +145,8 @@ async function ingest(env, update, ctx) {
 
 async function digest(env, day, kind, keep = false) {
   const runStart = Math.floor(Date.now() / 1000);
-  const { results: rows } = await env.DB.prepare("SELECT ts, name, tag, text FROM messages WHERE ts < ? ORDER BY ts, message_id").bind(runStart).all();
+  const { results: stored } = await env.DB.prepare("SELECT ts, name, tag, text FROM messages WHERE ts < ? ORDER BY ts, message_id").bind(runStart).all();
+  const rows = stored.map((r) => ({ ...r, name: displayName(r.name) })); // rows stored before displayName (25.09.2026)
   if (!rows.length) return `${kind}: нема повідомлень`;
 
   // ponytail: one offset for the whole run — messages across a DST switch night show ±1h.
@@ -145,7 +158,7 @@ async function digest(env, day, kind, keep = false) {
   const protectedTerms = [...new Set(rows.map((r) => r.name)), ...tags.values(), BOT_NAME];
   const prev = await env.DB.prepare("SELECT plan FROM digests WHERE plan IS NOT NULL ORDER BY created DESC LIMIT 1").first("plan");
 
-  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms, tags);
+  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms, tags, kind === "evening" ? await pollText(env, day).catch((e) => (console.log("poll text:", e.message), "")) : "");
   const prefix = env.TEST_MODE === "1" ? `[ТЕСТ · ${kind} · ${rows.length} повідомлень]\n\n` : "";
 
   if (!play.text) {
@@ -182,36 +195,72 @@ async function grumble(env, now, forced, toGroup = false) {
 const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2: funniest, still coherent
 
 // One reply, not sent: used by the live answer and by /run?kind=sample for comparing temperatures.
-async function compose(env, name, raw, botText, temperature = REPLY_TEMP) {
+async function compose(env, name, raw, botText, temperature = REPLY_TEMP, context = "") {
   const fixed = fixedReply(raw); // "@бабця + surname": the user's own answer, no model
   if (fixed) return { tone: "фраза", text: fixed };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  const image = pick(IMAGES);
   const tone = Math.random() < RUDE_SHARE ? "rude" : "wise";
   const topic = topicFor(raw, kyiv(new Date()).hour); // "@бабця + word": a matching topic replaces the random move
   const who = isFemale(name, femaleSet(env.FEMALE_NAMES)) ? "Автор — жінка: жіночий рід, «доню»." : "Автор — чоловік: чоловічий рід, «синку».";
-  const said = await ai(env, replyPrompt, `${name} пише: «${raw.slice(0, 500) || "(без тексту — гіфка, стікер чи фото)"}»${botText ? `\n(це відповідь на твоє: «${botText.slice(0, 300)}»)` : ""}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${who} ${REPLY_TONES[tone]} ${topic ? topic.hint : pick(REPLY_MOVES[tone])} Порівняння бери з теми «${image}».)`, temperature, 200);
-  if (!said) return { tone: topic?.key || tone, text: "" };
-  let text = tidy(warFallback(stripHints(said.trim(), image).replace(/^[«"]+|[»"]+$/g, ""), raw));
+  const talk = context ? `РОЗМОВА ПЕРЕД ЦИМ (лише щоб зрозуміти, про що мова):\n${context}\n\n` : "";
+  const asked = `${name} пише: «${raw.slice(0, 500) || "(без тексту — гіфка, стікер чи фото)"}»${botText ? `\n(це відповідь на твоє: «${botText.slice(0, 300)}»)` : ""}`;
+  // Same tone for all drafts (the rude/wise ratio holds), a different move and image each — that's the variety.
+  const draft = async () => {
+    const image = pick(IMAGES);
+    const said = await ai(env, replyPrompt, `${talk}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${who} ${REPLY_TONES[tone]} ${topic ? topic.hint : pick(REPLY_MOVES[tone])} Порівняння бери з теми «${image}».)`, temperature, 200);
+    return said ? tidy(warFallback(stripHints(said.trim(), image).replace(/^[«"]+|[»"]+$/g, ""), raw)) : "";
+  };
+  const drafts = (await Promise.all(Array.from({ length: REPLY_DRAFTS }, draft))).filter(Boolean);
+  if (!drafts.length) return { tone: topic?.key || tone, text: "" };
+  let best = 0;
+  if (drafts.length > 1) {
+    const vote = await ai(env, JUDGE, `${talk}${asked}\n\nВаріанти:\n${drafts.map((d, i) => `${i + 1}. ${d}`).join("\n")}`, 0.2, 5);
+    best = Math.max(0, Math.min(drafts.length - 1, (Number(vote.match(/\d/)?.[0]) || 1) - 1));
+  }
+  let text = drafts[best];
   // Same corrector as the plays: replies went straight out and "той розписка" got caught by the group (24.09.2026).
   text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, text, 0.2, 300)), { protectedTerms: [name, BOT_NAME] }).text;
   return { tone: topic?.key || tone, text: dropName(text, name).slice(0, 500) };
 }
 
 async function answer(env, msg, name, raw, botText) {
-  const { tone, text } = await compose(env, name, raw, botText);
+  // The last dozen messages, so she answers the conversation and not just the one line (25.09.2026).
+  // ponytail: right after a play the table is emptied and there's little context until people write again.
+  const { results } = await env.DB.prepare("SELECT name, text FROM messages WHERE message_id != ? ORDER BY ts DESC LIMIT 12").bind(msg.message_id).all();
+  const context = results.reverse().map((r) => `${displayName(r.name)}: ${r.text}`).join("\n");
+  const { tone, text } = await compose(env, name, raw, botText, REPLY_TEMP, context);
   if (!text) return console.log(`Відповідь ${name}: порожньо (модель нічого не дала)`);
   await telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id } })
     .then(() => console.log(`Відповідь ${name} (${tone}): ${text}`), (e) => console.log("Відповідь:", e.message));
 }
 
-// ponytail: send only — polls aren't stored, closed or tallied yet; a weekly verdict needs their message ids in D1.
 async function poll(env, toGroup = false) {
-  await telegram(env, "sendPoll", { chat_id: target(env, toGroup), question: QUESTION, options: OPTIONS.map((text) => ({ text })),
+  const sent = await telegram(env, "sendPoll", { chat_id: target(env, toGroup), question: QUESTION, options: OPTIONS.map((text) => ({ text })),
     // Anonymous, one answer, final vote: the weekly tally counts exactly two fixed options. Bots can't let
     // members add options (sendPoll has no such parameter), so the option list stays as sent.
     is_anonymous: true, allows_multiple_answers: false, allows_revoting: false });
+  await env.DB.prepare("INSERT OR REPLACE INTO polls (day, chat_id, message_id) VALUES (?, ?, ?)").bind(kyiv(new Date()).day, String(sent.chat.id), sent.message_id).run();
   return `poll: ${QUESTION}`;
+}
+
+// 22:00: today's poll is closed and counted before the evening play reads it.
+async function closePoll(env, day) {
+  const row = await env.DB.prepare("SELECT chat_id, message_id FROM polls WHERE day = ? AND zrada IS NULL").bind(day).first();
+  if (!row) return;
+  const p = await telegram(env, "stopPoll", { chat_id: row.chat_id, message_id: row.message_id });
+  const [zrada, peremoga] = OPTIONS.map((o) => p.options.find((x) => x.text === o)?.voter_count ?? 0);
+  await env.DB.prepare("UPDATE polls SET zrada = ?, peremoga = ? WHERE day = ?").bind(zrada, peremoga, day).run();
+  console.log(`poll closed: зрада ${zrada} — перемога ${peremoga}`);
+}
+
+// The day's verdict for the evening play; on Sunday the Monday–Sunday week follows.
+// ponytail: a skipped evening play (<50 messages) skips the verdict, and on Sunday the week's too.
+async function pollText(env, day) {
+  const today = await env.DB.prepare("SELECT zrada, peremoga FROM polls WHERE day = ? AND zrada IS NOT NULL").bind(day).first();
+  if (!today || new Date(`${day}T12:00:00Z`).getUTCDay() !== 0) return pollRemark(today);
+  const monday = new Date(Date.parse(day) - 6 * 864e5).toISOString().slice(0, 10);
+  const { results: week } = await env.DB.prepare("SELECT zrada, peremoga FROM polls WHERE day >= ? AND day <= ? AND zrada IS NOT NULL").bind(monday, day).all();
+  return pollRemark(today, week);
 }
 
 async function newGrumble(env, section, list) {
@@ -224,7 +273,7 @@ async function newGrumble(env, section, list) {
   return text.length >= 15 && !list.includes(text) ? text.slice(0, 300) : "";
 }
 
-async function buildPlay(env, lines, header, context, protectedTerms, tags = new Map()) {
+async function buildPlay(env, lines, header, context, protectedTerms, tags = new Map(), remark = "") {
   const intro = "Повідомлення групи «Альтанка біля АТБ»:\n\n";
   const parts = splitChunks(lines);
   const plans = [];
@@ -240,17 +289,27 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   const writerChat = writerLines.join("\n");
   const [lo, hi] = lengthTarget(writerLines.length);
   // Past BIG_DAY the raw chat drowns the writer: it transcribes instead of writing.
-  const chatPart = writerLines.length <= BIG_DAY ? header + writerChat : "не надано — день великий, пиши лише за планом; найкращі фрази в плані дослівні";
-  let play = await ai(env, writePrompt, `ОБРАЗ ДНЯ: ${IMAGES[Math.floor(Math.random() * IMAGES.length)]}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${nightLine(writerLines)}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
+  const chatPart = writerLines.length <= BIG_DAY ? header + writerChat : "не надано — день великий, пиши лише за планом; найкраща фраза кожної теми в плані дослівна";
+  const image = IMAGES[Math.floor(Math.random() * IMAGES.length)], night = nightLine(writerLines);
+  let play = await ai(env, writePrompt, `ОБРАЗ ДНЯ: ${image}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${night}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
   if (!play) return { error: "п'єса" };
 
   if (play.length > HARD_LIMIT) {
     const short = await ai(env, `Скороти п'єсу до ${hi} символів: прибери найслабші ремарки й повтори. Головну розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
     if (short.length > 500 && short.length < play.length) play = short;
   }
-  const polished = applyFixes(play, dedupLoop(await ai(env, polishPrompt, play, 0.2, 900)), { protectedTerms });
-  console.log(`Коректор: застосовано ${polished.applied.length}, відхилено ${polished.rejected.length}`, polished.rejected);
-  play = polished.text;
+  const copied = copiedLines(play, writerLines);
+  if (copied.length > COPY_MAX) {
+    const fix = await ai(env, "Ці репліки п'єси майже дослівно переписані з чату сусідів. Перекажи кожну своїми словами в стилі п'єси Подерв'янського: пафос на рівному місці, абсурдне порівняння з побутом, суржик і мат лишаються, зміст не змінюй, ім'я героя на початку не чіпай. Для КОЖНОЇ репліки виведи рядок «стара репліка => нова репліка». Нічого, крім цих пар, не пиши.", copied.join("\n"), 0.9, 900);
+    const r = applyFixes(play, dedupLoop(fix), { maxOld: 400, maxNew: 450, protectedTerms, hedging: null });
+    play = r.text;
+    console.log(`Переказ: скопійовано ${copied.length}, переписано ${r.applied.length}, відхилено ${r.rejected.length}`);
+  }
+  for (const [pass, prompt, tokens] of [["Коректор", polishPrompt, 900], ["Узгодження", polishPrompt + AGREE_PASS, 600]]) {
+    const polished = applyFixes(play, dedupLoop(await ai(env, prompt, play, 0.2, tokens)), { protectedTerms });
+    console.log(`${pass}: застосовано ${polished.applied.length}, відхилено ${polished.rejected.length}`, polished.rejected);
+    play = polished.text;
+  }
 
   const war = warWords(play, writerChat);
   if (war.length) {
@@ -260,7 +319,8 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     console.log(`Війна: ${war.join(", ")}; застосовано ${fixed.applied.length}, відхилено ${fixed.rejected.length}; лишилось: ${warWords(play, writerChat).join(", ") || "—"}`, fix.slice(0, 500));
   }
   const senders = protectedTerms.filter((t) => t !== BOT_NAME && lines.some((l) => l.includes(`] ${t}: `)));
-  return { text: finalize(rollCall(castClean(castFix(play, senders), tags, senders), senders)), plan };
+  const staged = rollCall(castShuffle(castClean(castFix(play, senders), tags, senders)), senders);
+  return { text: finalize(stageHead(remark ? beforeMoral(staged, remark) : staged, image, night.match(/«(.+)»\.$/)?.[1])), plan };
 }
 
 // One retry on an empty answer or an error (rate limit, "finish_reason: length"), per requirements.

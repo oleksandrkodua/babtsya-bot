@@ -17,6 +17,15 @@ CREATE TABLE IF NOT EXISTS digests (
   PRIMARY KEY (day, kind)
 );
 
+-- One row per daily poll: sent at 21:00, closed at 22:00 before the evening play; counts feed the day and week verdicts.
+CREATE TABLE IF NOT EXISTS polls (
+  day TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  zrada INTEGER,
+  peremoga INTEGER
+);
+
 -- Name → Telegram user id, refreshed from every message: a real tag (text_mention) needs the id. Kept across digests.
 CREATE TABLE IF NOT EXISTS people (
   name TEXT PRIMARY KEY,

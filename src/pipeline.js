@@ -32,12 +32,18 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними" };
+// "Бабця, ти сьогодні…" — addressing her needs the vocative (25.09.2026). Only at the start of a line or a reply,
+// so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
+const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
 
 const redact = (t) => REDACTIONS.reduce((s, [re, ph]) => s.replace(re, ph), t);
 // "@nick" in the digest would ping that person; the bare nick keeps the meaning without a notification.
 const MENTION = /(^|[^\w.@])@([A-Za-z][\w]{3,31})/g;
 export const unmention = (t) => t.replace(MENTION, "$1$2");
+// "Iron Grey Owl, esquire" is one person, but a comma in a name splits every list (roll call, say&tag=…):
+// the part before the first comma is the name everywhere (user, 25.09.2026).
+export const displayName = (n) => n.split(",")[0].trim() || n;
 
 // Telegram message → stored text, or null for noise. Runs at ingestion, one message per invocation.
 export function messageText(msg) {
@@ -56,7 +62,7 @@ export function messageText(msg) {
   return unmention(redact(text.slice(0, 800)).replace(BOT_HANDLE, BOT_NAME)); // ponytail: 800-char cap per message keeps a pasted article from eating the day
 }
 
-export const lengthTarget = (n) => (n <= 20 ? [600, 900] : n <= 150 ? [1200, 2000] : [2000, 3000]);
+export const lengthTarget = (n) => (n <= 20 ? [500, 800] : n <= 150 ? [900, 1400] : [1400, 2000]); // a third shorter (25.09.2026)
 
 export const splitChunks = (lines, size = CHUNK) =>
   lines.length <= BIG_DAY ? [lines] : Array.from({ length: Math.ceil(lines.length / size) }, (_, i) => lines.slice(i * size, (i + 1) * size));
@@ -74,7 +80,7 @@ export function dedupLoop(text, maxRepeats = 3) {
   return text;
 }
 
-export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTerms = [] } = {}) {
+export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTerms = [], hedging = SUSPECT_COMMENTARY } = {}) {
   const applied = [], rejected = [];
   for (const line of reply.split("\n")) {
     if (!line.includes("=>")) continue;
@@ -85,7 +91,7 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
     // A clean fix is short and literal; hedging is the model thinking out loud. Names, tags and
     // the bot's name look like typos to the model and must never be altered or removed.
     const touchesProtected = protectedTerms.some((p) => (old.includes(p) && !neu.includes(p)) || p.includes(old));
-    if (old.length > maxOld || neu.length > maxNew || SUSPECT_COMMENTARY.test(neu) || touchesProtected) {
+    if (old.length > maxOld || neu.length > maxNew || hedging?.test(neu) || touchesProtected) {
       rejected.push(`${old} => ${neu}`);
       continue;
     }
@@ -93,20 +99,31 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
     applied.push(`${old} => ${neu}`);
   }
   for (const [old, neu] of Object.entries(STATIC_FIXES)) if (text.includes(old)) text = text.replaceAll(old, neu);
+  text = text.replace(VOCATIVE, "$1Бабцю");
   return { text, applied, rejected };
 }
 
 // ponytail: stem-in-chat heuristic — a metaphor slips through on a day a member wrote the same word.
 export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []).map((w) => w.toLowerCase()))].filter((w) => !chat.toLowerCase().includes(w));
 
-// Grumbles: every 90 min from 08:00 to 21:30 Kyiv (minutes of the day); 08:00 is always a morning one.
-export const GRUMBLE_SLOTS = [480, 570, 660, 750, 840, 930, 1020, 1110, 1200, 1290];
+// Grumbles: every 90 min from 08:00 to 18:30 Kyiv (minutes of the day); 08:00 is always a morning one.
+// 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
+export const GRUMBLE_SLOTS = [480, 570, 660, 750, 840, 930, 1020, 1110];
+export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play only the 12:30 lunch call, nothing till 15:00
 const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tune on the real group
 
-// Сусід gets one phrase a day at a half-hour tick 09:00–21:30 that no regular grumble uses. The tick comes from
-// the date itself, so there's nothing to store and a retried cron can't post it twice.
-// ponytail: day number × 7 over 18 ticks — next day jumps 3.5 h, the pattern repeats every 18 days.
-const NEIGHBOUR_TICKS = Array.from({ length: 26 }, (_, i) => 540 + i * 30).filter((m) => !GRUMBLE_SLOTS.includes(m));
+// Сусід gets one phrase a day at a half-hour tick 09:00–19:30 that no regular grumble uses and that isn't in the
+// 13:00–15:00 quiet. The tick comes from the date itself, so there's nothing to store and a retried cron can't post it twice.
+// ponytail: day number × 7 over 12 ticks — next day jumps ~3.5 h, the pattern repeats every 12 days.
+const NEIGHBOUR_TICKS = Array.from({ length: 22 }, (_, i) => 540 + i * 30)
+  .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
+// One tease (TEASE in wrangler.toml) every third day at a half-hour 16:00–23:00 (user, 25.09.2026) — past the evening
+// silence on purpose, but not on the 21:00 poll, the 22:00 play or a grumble tick. Same date trick as Сусід.
+const TEASE_TICKS = Array.from({ length: 15 }, (_, i) => 960 + i * 30).filter((m) => ![1260, 1320].includes(m) && !GRUMBLE_SLOTS.includes(m));
+export const teaseMinute = (day) => {
+  const d = Date.parse(day) / 864e5;
+  return d % 3 ? null : TEASE_TICKS[d % TEASE_TICKS.length];
+};
 export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e5) * 7) % NEIGHBOUR_TICKS.length];
 
 export const parseGrumbles = (txt) => {
@@ -126,7 +143,7 @@ export const grumbleSection = (minute, recent) =>
   : recent != null && recent <= QUIET_MAX ? "тиша"
   : minute < 600 ? "ранок"
   : minute >= 720 && minute < 840 ? "обід"
-  : minute >= 1140 ? "вечір"
+  : minute >= 1110 ? "вечір"
   : "загальне";
 
 // Every answer opened "X, ти шо, з …" and the group noticed ("вона повторюється", 24.09.2026). Code picks the move,
@@ -352,6 +369,20 @@ export function castClean(play, tags, names = []) {
   return play.slice(0, start) + fixed + play.slice(start + block.length);
 }
 
+// «Дійові особи» in a new order every time, "та інші мешканці двору" stays last (user, 25.09.2026).
+export function castShuffle(play, rnd = Math.random) {
+  const start = play.indexOf("Дійові особи:");
+  if (start < 0) return play;
+  const end = play.indexOf("\n\n", start);
+  const [head, ...body] = play.slice(start, end < 0 ? undefined : end).split("\n");
+  const rest = body.filter((l) => l.startsWith("та інші")), cast = body.filter((l) => !l.startsWith("та інші"));
+  for (let i = cast.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [cast[i], cast[j]] = [cast[j], cast[i]];
+  }
+  return play.slice(0, start) + [head, ...cast, ...rest].join("\n") + (end < 0 ? "" : play.slice(end));
+}
+
 // Everyone who wrote but isn't named anywhere in the play gets a roll-call remark before the moral, so nobody
 // finds out they "wrote nothing today" ("А я сьогодні ніхуя не писав виходить", 24.09.2026). A name counts as present
 // if its part before a comma appears ("Iron Grey Owl" for "Iron Grey Owl, esquire").
@@ -379,16 +410,41 @@ export function rollCall(play, names) {
   const missing = [...new Set(names)].filter((n) => !flat.includes(nameKey(n.split(",")[0])));
   if (!missing.length) return play;
   const who = missing.length > 12 ? `${missing.slice(0, 12).join(", ")} та ще ${missing.length - 12}` : missing.join(", ");
-  const line = `(Також у дворі галасували: ${who}.)`;
+  return beforeMoral(play, `(Також у дворі галасували: ${who}.)`);
+}
+
+// Code-made remarks (roll call, poll verdict) go right before the moral.
+export function beforeMoral(play, line) {
   const moral = play.lastIndexOf("\nМораль");
   return moral < 0 ? `${play.trimEnd()}\n\n${line}` : `${play.slice(0, moral).trimEnd()}\n\n${line}\n${play.slice(moral)}`;
+}
+
+// Replicas the writer copied from the chat instead of writing (25.09.2026: news retold word for word): 6 words in a
+// row shared with any chat message. The last replica of a scene may stay verbatim — it's the punchline.
+const plainWords = (s) => s.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+export function copiedLines(play, chat, n = 6) {
+  const seen = new Set();
+  for (const m of chat) {
+    const w = plainWords(m.replace(/^\[\d\d:\d\d\] [^:\n]+: (?:\(відповідь [^)]*\) )?/, ""));
+    for (let i = 0; i + n <= w.length; i++) seen.add(w.slice(i, i + n).join(" "));
+  }
+  const lines = play.split("\n");
+  return lines.filter((l, i) => {
+    const said = l.match(/^([^\n:]{1,80}): (.+)/)?.[2];
+    if (!said || l.startsWith("Мораль")) return false;
+    const next = lines.slice(i + 1).find((x) => x.trim()) ?? "";
+    if (!next || next.startsWith("(") || next.startsWith("Мораль")) return false;
+    const w = plainWords(said);
+    for (let k = 0; k + n <= w.length; k++) if (seen.has(w.slice(k, k + n).join(" "))) return true;
+    return false;
+  });
 }
 
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
-  "|(?:Учасники|Температура|Хронологія|Чим закінчилось|Найкращі фрази)\\s*:.*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
   "gmu",
@@ -424,6 +480,16 @@ export const tidy = (text) =>
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
 
+// The form's fixed parts come from code, the model skips them (25.09.2026): "П'єса на одну дію", the opening line
+// with the image of the day when the model wrote none, and the night scene's title from nightLine.
+export function stageHead(play, image, nightTitle) {
+  if (!play.includes("П'єса на одну дію")) play = play.replace(/\n*Дійові особи:/, "\nП'єса на одну дію\n\nДійові особи:");
+  const cast = play.indexOf("Дійові особи:"), end = play.indexOf("\n\n", cast);
+  if (cast >= 0 && end > 0 && !play.includes("Дія відбувається"))
+    play = `${play.slice(0, end)}\n\nДія відбувається на альтанці біля АТБ. Образ дня — ${image}.${play.slice(end)}`;
+  return nightTitle ? play.replace(/\(Сцена 1\. [^.\n)]*/, `(Сцена 1. ${nightTitle}`) : play;
+}
+
 export function finalize(play) {
   play = tidy(play).replace(/([^\n])\n(\(Сцена)/g, "$1\n\n$2");
   if (!play.trimStart().startsWith(`${BOT_NAME} представляє`)) play = `${BOT_NAME} представляє\n\n${play.trimStart()}`;
@@ -456,10 +522,13 @@ if (import.meta.main) {
   assert.equal(grumbleSection(750, 10), "обід");
   assert.equal(grumbleSection(1020, 40), "гаряче");
   assert.equal(grumbleSection(1020, 10), "загальне");
-  assert.equal(grumbleSection(1290, 10), "вечір");
+  assert.equal(grumbleSection(1110, 10), "вечір");
   assert.equal(grumbleSection(750, null), "обід");
+  const teases = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30"].map(teaseMinute);
+  assert.equal(teases.filter((m) => m != null).length, 2, String(teases));
+  assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, 1020, 1110].includes(m))), String(teases));
   const neighbourDays = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"].map(neighbourMinute);
-  assert.ok(neighbourDays.every((m) => m >= 540 && m <= 1290 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m)), String(neighbourDays));
+  assert.ok(neighbourDays.every((m) => m >= 540 && m < 1200 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900)), String(neighbourDays));
   assert.ok(new Set(neighbourDays).size > 1, "different days, different times");
   assert.equal(grumbleSection(1020, null), "загальне");
   const g = parseGrumbles(readFileSync(new URL("../prompts/grumbles.txt", import.meta.url), "utf8"));
@@ -582,8 +651,23 @@ if (import.meta.main) {
     "Дійові особи:\nIron Grey Owl, esquire «Архіваріус» — зберігав квитанції\nZina 🐸 Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.");
   assert.equal(castFix(lossy, ["Iron Grey Owl, esquire"]), lossy);
   assert.equal(rollCall(lossy, ["✙Petro Bez✙"]), lossy);
+  assert.equal(displayName("Iron Grey Owl, esquire"), "Iron Grey Owl");
+  assert.equal(displayName("Ivan M"), "Ivan M");
+  const chatNews = ["[09:00] Ivan M: Сайт на маїл ру виглядає як NV але там немає українських новин", "[09:05] Nina: (відповідь Ivan M) а курку я віддала тещі ще вчора ввечері"];
+  const copyPlay = "(Сцена 1. Ранок.)\nIvan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!\nNina: Курку я віддала тещі ще вчора ввечері.\n(Тиша.)\n\nМораль: сайт на маїл ру виглядає як NV але там";
+  assert.deepEqual(copiedLines(copyPlay, chatNews), ["Ivan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!"]);
+  assert.equal(applyFixes("Ivan M: було так", "було так => якщо так, то (сердито) інакше", { maxOld: 400, maxNew: 400, hedging: null }).text, "Ivan M: якщо так, то (сердито) інакше");
+  assert.equal(tidy("РОЗМОВА ПЕРЕД ЦИМ:\nНу"), "Ну");
+  assert.equal(stageHead("«Назва»\n\nДійові особи:\nA — а\n\n(Сцена 1. Нічна дифузія мозку. Темно.)\nA: Ну!", "сусідський кіт", "Нічна зміна"),
+    "«Назва»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці біля АТБ. Образ дня — сусідський кіт.\n\n(Сцена 1. Нічна зміна. Темно.)\nA: Ну!");
+  const staged = "«Н»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці. Кіт.\n\n(Сцена 1. Ранок.)";
+  assert.equal(stageHead(staged, "кіт", ""), staged);
+  assert.equal(applyFixes("Ко: Бабця, ти каталась?\n(Бабця, як завжди, мовчить.)", "").text, "Ко: Бабцю, ти каталась?\n(Бабця, як завжди, мовчить.)");
+  assert.equal(castShuffle("Дійові особи:\nA — а\nB — б\nC — в\nта інші мешканці двору\n\nA: Ну!", () => 0),
+    "Дійові особи:\nB — б\nC — в\nA — а\nта інші мешканці двору\n\nA: Ну!");
+  assert.equal(tidy("Тип: НОВИНИ\nНайкраща фраза: «ну»\nСцена"), "Сцена");
   assert.equal(dedupLoop("a\n".repeat(10) + "b"), "a\na\na");
-  assert.deepEqual(lengthTarget(10), [600, 900]);
+  assert.deepEqual(lengthTarget(10), [500, 800]);
   assert.equal(splitChunks(Array(700).fill("x")).length, 3);
   assert.equal(splitChunks(Array(40).fill("x")).length, 1);
   assert.deepEqual(withoutReposts(["[10:00] Ivan M: [переслав допис з каналу «Південь»]", "[10:01] Ivan M: [переслав чуже повідомлення]",

@@ -31,6 +31,16 @@ export function weekVerdict(days) {
   return { winner, title: TITLES[winner], days: won };
 }
 
+// The remark put before the evening play's moral; on Sunday the week's title follows (user's plan, 24.09.2026).
+export function pollRemark(today, week) {
+  if (!today) return "";
+  const v = dayVerdict(today);
+  let s = `(Двір проголосував: зрада ${today.zrada} — перемога ${today.peremoga}. ${v ? `Сьогодні — ${v}.` : "Нічия, не рахується."})`;
+  const w = week?.length ? weekVerdict(week) : null;
+  if (w) s += `\n(Підсумок тижня: ${w.title}. Днів перемоги — ${w.days.перемога}, зради — ${w.days.зрада}.)`;
+  return s;
+}
+
 if (import.meta.main) {
   const { strict: assert } = await import("node:assert");
   const d = (zrada, peremoga) => ({ zrada, peremoga });
@@ -45,6 +55,11 @@ if (import.meta.main) {
   assert.equal(weekVerdict([d(3, 1), d(1, 3), d(5, 5)]).winner, "нічия"); // 1:1 days, votes 9:9
   assert.equal(weekVerdict([d(2, 2), d(0, 0)]), null);
   assert.equal(weekVerdict([]), null);
+
+  assert.equal(pollRemark(d(2, 5)), "(Двір проголосував: зрада 2 — перемога 5. Сьогодні — перемога.)");
+  assert.equal(pollRemark(d(3, 3), [d(3, 3)]), "(Двір проголосував: зрада 3 — перемога 3. Нічия, не рахується.)");
+  assert.ok(pollRemark(d(1, 4), [d(1, 4), d(6, 2), d(0, 3)]).endsWith("(Підсумок тижня: Переможний тиждень (I'm tired of winning). Днів перемоги — 2, зради — 1.)"));
+  assert.equal(pollRemark(null), "");
 
   // Simulated week, as it would look in the group.
   const week = { Пн: d(3, 7), Вт: d(8, 2), Ср: d(0, 0), Чт: d(5, 5), Пт: d(1, 9), Сб: d(6, 4), Нд: d(2, 3) };
