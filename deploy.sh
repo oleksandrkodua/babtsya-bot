@@ -3,7 +3,7 @@
 # Usage: ./deploy.sh "що змінилось"
 set -e
 cd "$(dirname "$0")"
-node src/pipeline.js
+npm test
 git add -A
 git diff --cached --quiet || git commit -q -m "${1:-deploy $(date '+%d.%m %H:%M')}"
 npx wrangler deploy

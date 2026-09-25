@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS polls (
   peremoga INTEGER
 );
 
--- Stock of pictures made ahead and scored by the committee (meat for the Deli tease). data = the JPEG as base64,
+-- Stock of pictures made ahead and scored by the committee (meat for the Lida tease). data = the JPEG as base64,
 -- kept here until it's sent, then cleared (25.09.2026: no parking in the owner's private chat). Rows from the first
 -- day have a Telegram file_id instead and no data. Existing base: ALTER TABLE pics ADD COLUMN data TEXT (once).
 CREATE TABLE IF NOT EXISTS pics (
@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS pics (
   created INTEGER NOT NULL,
   used INTEGER,
   data TEXT
+);
+
+-- Tag replies per Kyiv day: past REPLY_FULL_MAX a reply goes lean, so the plays keep their neurons.
+CREATE TABLE IF NOT EXISTS usage (
+  day TEXT PRIMARY KEY,
+  replies INTEGER NOT NULL
 );
 
 -- Name → Telegram user id, refreshed from every message: a real tag (text_mention) needs the id. Kept across digests.

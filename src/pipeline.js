@@ -11,6 +11,7 @@ const BOT_HANDLE = /@babtsya_z_altanky_bot\b/gi;
 
 // JS \b is ASCII-only, so Cyrillic word starts need a lookbehind.
 const WORD_START = "(?<![\\p{L}\\p{N}_])";
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // a literal inside a RegExp
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu;
 // Only reposts are filtered (user's decision); the chat mixes Ukrainian and Russian.
 // Monitoring channels write in jargon ("розвідрон", "КАБи", "Бандеролі", "Су-34"), so some stems match mid-word
@@ -117,12 +118,12 @@ const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tun
 // ponytail: day number × 7 over 12 ticks — next day jumps ~3.5 h, the pattern repeats every 12 days.
 const NEIGHBOUR_TICKS = Array.from({ length: 22 }, (_, i) => 540 + i * 30)
   .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
-// One tease (TEASE in wrangler.toml) every third day at a half-hour 16:00–23:00 (user, 25.09.2026) — past the evening
+// One tease (TEASE in wrangler.toml) every second day (odd day numbers, so 25.09.2026 is one) at a half-hour 16:00–23:00 (user, 25.09.2026) — past the evening
 // silence on purpose, but not on the 21:00 poll, the 22:00 play or a grumble tick. Same date trick as Сусід.
 const TEASE_TICKS = Array.from({ length: 15 }, (_, i) => 960 + i * 30).filter((m) => ![1260, 1320].includes(m) && !GRUMBLE_SLOTS.includes(m));
 export const teaseMinute = (day) => {
   const d = Date.parse(day) / 864e5;
-  return d % 3 ? null : TEASE_TICKS[d % TEASE_TICKS.length];
+  return d % 2 === 1 ? TEASE_TICKS[d % TEASE_TICKS.length] : null;
 };
 export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e5) * 7) % NEIGHBOUR_TICKS.length];
 
@@ -152,26 +153,26 @@ export const grumbleSection = (minute, recent) =>
 // philosophically, with Poderviansky pathos, no insults (user's ratio, 24.09.2026).
 export const RUDE_SHARE = 1 / 3;
 export const REPLY_TONES = {
-  rude: "Тон грубий: відгавкайся, мат доречний.",
+  rude: "Тон грубий: відгавкайся, мат доречний, але спершу відповідь по суті, потім лайка.",
   wise: "Тон філософський: відповідай по суті того, що написав автор, — з пафосом і абсурдом, як мудра бабця на лавці, що бачила все; без образ автора, мат щонайбільше одне слівце для колориту.",
 };
 export const REPLY_MOVES = {
   rude: [
-    "Почни канцеляритом: «Згідно з регламентом двору…», «Доводжу до відома…» — і зірвись на лайку.",
-    "Почни з наказу чи поради: «Іди…», «Сядь…», «Запиши собі…».",
+    "Почни канцеляритом, як офіційне оголошення управдому, — і зірвись на лайку.",
+    "Почни з короткого наказу чи поради автору.",
     "Почни з вигуку чи матюка, потім несподівано мудра фраза.",
     "Відповідай одним гострим порівнянням автора з чимось побутовим — без вступу.",
     "Відповідай погрозою в дусі бабці: що вона зробить, якщо автор не вгамується.",
     "Висміюй сказане так, ніби це оголошення на дошці біля під'їзду.",
     "Відповідай, як касирка АТБ наприкінці зміни: коротко, зло й по ділу.",
-    "Почни з «Та шоб тебе…» і закінчи несподіваним побажанням.",
+    "Почни з народного прокляття й закінчи несподівано добрим побажанням.",
     "Прикинься, що доповідаєш дільничному про автора, — сухо й з лайкою.",
     "Відповідай риторичним питанням, яке саме по собі вже образа.",
   ],
   wise: [
     "Почни з філософського узагальнення про життя, двір чи людство.",
-    "Почни зі спогаду бабці: «У вісімдесят п'ятому…» — і виведи з нього мораль про те, що написав автор.",
-    "Почни з «Синку» (якщо автор чоловік) чи «Доню» (якщо жінка), як бабця, яка зараз прочитає лекцію про суть сказаного.",
+    "Почни зі спогаду бабці з вісімдесятих чи дев'яностих — і виведи з нього мораль про те, що написав автор.",
+    "Відповідай як бабця, яка зараз прочитає лекцію про суть сказаного.",
     "Відповідай вигаданою народною мудрістю чи приказкою, що несподівано пасує до сказаного.",
     "Зроби вигляд, що не почула, і відповідай про щось своє, бабцине, — але так, щоб це виявилось глибоким коментарем до сказаного.",
     "Відповідай пафосним пророцтвом про двір, АТБ чи людство, що випливає зі сказаного.",
@@ -179,7 +180,7 @@ export const REPLY_MOVES = {
     "Відповідай так, ніби пишеш некролог сказаному — урочисто й абсурдно.",
     "Зведи сказане до однієї дрібної побутової істини й подай її як відкриття століття.",
     "Відповідай як мудрий старець із казки, але зі словником бабці з лавки.",
-    "Почни з «Колись мені мама казала…» і доведи до абсурду.",
+    "Почни з маминої науки й доведи її до абсурду.",
     "Дай пораду, як із цим жити далі, — корисну, але так, що смішно.",
     "Відповідай, ніби це питання до передачі «Здоров'я» чи «Поле чудес», і ведуча — ти.",
     "Знайди у сказаному щось зворушливе й поплач над цим по-бабциному, з пафосом.",
@@ -203,7 +204,7 @@ export const IMAGES = [
   "квитанція за газ", "дзеркало в передпокої", "тапки біля дверей", "гречка про запас", "чайний гриб у банці",
   "прання в тазику", "кросворд у газеті", "лото на дачі", "бабусина скриня", "сусідка з собачкою",
   "шуба в нафталіні", "пляшка кефіру з зеленою кришкою", "табуретка на кухні", "городня лопата", "курси валют на базарі",
-  "весілля в їдальні", "ламповий телевізор", "стара «Волга» в гаражі", "похід у баню", "мішок картоплі на балконі",
+  "весілля в їдальні", "стара «Волга» в гаражі", "похід у баню", "мішок картоплі на балконі",
   "відривний календар", "пральна машина «Малютка»", "рецепт медовика", "дідова вудка", "розсада на підвіконні",
   "черга в собес", "тролейбусний квиток", "аптечка з зеленкою", "сусідський перфоратор", "молочна кухня",
 ];
@@ -218,7 +219,6 @@ export const stripHints = (text, image = "") =>
 // The answer is a reply, so naming the author is noise ("Ivan M, ще при Кучмі…", 24.09.2026). Full name, the part
 // before a comma ("Iron Grey Owl") and the first word are cut wherever they stand, then punctuation is mended.
 export function dropName(text, name) {
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const forms = [...new Set([name, name.split(",")[0], name.split(" ")[0]].map((f) => f.trim()).filter((f) => f.length >= 3))];
   for (const f of forms.sort((a, b) => b.length - a.length)) {
     text = text.replace(new RegExp(`^\\s*${esc(f)}\\s*[,:—-]?\\s*`, "i"), "").replace(new RegExp(`\\s+${esc(f)}(?=\\s*[,!?.:—]|$)`, "gi"), "");
@@ -245,13 +245,41 @@ export const genderLine = (names, set) => {
 // Lunch only 12:00–14:00 Kyiv (user's rule, 24.09.2026); outside it such a tag gets the general answer.
 // Hints name no concrete places or objects: the model copied "на акції в АТБ, у колясочній" into all 8 samples.
 const W = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})`, "iu");
+// Every topic answers the question first: "розклади таро, чи виграє збірна України" got three stock cards about
+// the building, not a word about the team (25.09.2026). Hints carry no concrete examples — the model copies them.
 export const REPLY_TOPICS = [
+  // "дай рецепт оладків на молоці" got a joke about an old TV (25.09.2026): a request gets the real thing, in her voice.
+  { key: "рецепт", long: true, re: W("рецепт|як приготув|як зварит|що приготув|шо приготув|що зварит|шо зварит|что приготов|что свари|як спект|як засол|як посол|як зробит|как пригот|как свар|как испеч|как засол|как сдела"),
+    hint: "Тема — рецепт: дай СПРАВЖНІЙ робочий рецепт того, що просять: інгредієнти з кількістю й 3–6 коротких кроків, рядками. По-бабциному — з бурчанням на початку й одним жартом наприкінці, але рецепт має бути правильний. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
+  // Horoscopes and fortune-telling on request (25.09.2026): code picks the kind each time, so they don't repeat.
+  // A verse, a toast, a greeting (for the addressee if it's a reply to someone) — a format, not a one-liner (26.09.2026).
+  { key: "вірш", long: true, re: W("вірш|стишок|стишк|стихотвор|стих(?:и|ами)?(?![\\p{L}])|тост(?:а|ом|и)?(?![\\p{L}])|привіта|поздрав|з днем народж|с днем рожд|з днюх|с днюх|частушк|пісеньк|песенк"),
+    hint: "Тема — те, що просять: вірш (4–8 рядків у риму), тост (урочисто, з чаркою) чи привітання (побажання, спогад і добре прокляття-побажання наприкінці). Про того, кого чи що просять, пафосно, як на шкільній лінійці, з раптовим суржиком і влучним матом." },
+  // Dreams: "мені наснилось…", "розтлумач сон" (26.09.2026).
+  { key: "сон", long: true, re: W("сонник|наснил|приснил|снилос|снився|снилас|сниться|розтлумач"),
+    hint: "Тема — сонник: розтлумач сон автора за бабциним сонником — кожен символ зі сну: що він означає, і наприкінці пафосне абсурдне пророцтво." },
+  { key: "таро", long: true, re: W("таро|tarot"),
+    hint: "Тема — таро: розклади три карти з бабциної колоди на те, про що спитали. Карти вигадай щоразу нові, побутові й пов'язані з питанням (без карт із минулих відповідей); для кожної — що вона каже саме про це питання. Наприкінці — пряма відповідь на питання (так / ні / коли) і абсурдна порада. Пафосно, як справжня гадалка." },
+  { key: "гадання", long: true, re: W("погада|гадання|гадалк|поворож|ворож|кавов\\p{L}* гущ|по долон|на картах|розклад"),
+    hint: [
+      "Тема — гадання на кавовій гущі: що бабця побачила в чашці (три фігури з побуту) і що вони віщують.",
+      "Тема — гадання по долоні: лінія життя, серця й «лінія комуналки» — що кожна каже про автора, абсурдно.",
+      "Тема — гадання на картах, як у вісімдесятих: розклад на короля, даму й валета з двору — хто що задумав.",
+      "Тема — народне ворожіння на воску чи на цибулі: що вилилось чи проросло і що це значить.",
+      "Тема — ворожіння на бобах, як бабця вчилась у свекрухи: скільки бобів ліворуч, скільки праворуч і що з цього.",
+    ] },
+  { key: "гороскоп", long: true, re: W("гороскоп|зодіак|зірк|астролог|ретроград|меркурі"),
+    hint: [
+      "Тема — гороскоп на сьогодні: де застрягли планети (місце бери з теми порівняння, не з АТБ і не з колясочної) і чого остерігатись.",
+      "Тема — гороскоп на тиждень: коротко по днях, від понеділка до неділі, у 4–7 рядків, абсурдно.",
+      "Тема — любовний гороскоп: що зірки кажуть про кохання автора — пафосно й без пошлості.",
+      "Тема — фінансовий гороскоп: гроші, пенсія й акції в АТБ за розташуванням зірок.",
+      "Тема — гороскоп для всього двору: кожному знаку по пів рядка, знаки вигадай сама — щоразу нові.",
+    ] },
   { key: "обід", from: 12, to: 14, re: W("обід|обіда|пообіда|їсти|жерти|пиріж|борщ|вареник|котлет|голодн|їжа|їжу"),
     hint: "Тема — обід: поклич автора обідати, скажи, що в тебе на плиті й чому він мусить прийти негайно." },
   { key: "хахалі", re: W("хахал|кавалер|залиця|кохан|любов|заміж|жених|ухажер|роман[иа]?(?![\\p{L}])|дід|дєд"),
     hint: "Тема — хахалі: розкажи коротко про одного зі своїх колишніх кавалерів (вигаданого, з дев'яностих чи вісімдесятих) — з деталлю, від якої смішно." },
-  { key: "гороскоп", re: W("гороскоп|зодіак|зірк|астролог|ретроград|меркурі"),
-    hint: "Тема — гороскоп: дай авторові абсурдний гороскоп на сьогодні — де застрягли планети (місце бери з теми порівняння, не з АТБ і не з колясочної) і чого остерігатись." },
   { key: "погода", re: W("погод|дощ|спек|холод|сніг|вітер|мороз"),
     hint: "Тема — погода: дай прогноз за якоюсь бабциною домашньою прикметою — щоразу іншою." },
   { key: "гроші", re: W("пенсі|грош|ціни|цін[аиу]|акці|зарплат|комуналк|кредит|долар|гривн"),
@@ -260,12 +288,20 @@ export const REPLY_TOPICS = [
     hint: "Тема — здоров'я бабці: розкажи про свій тиск, коліна чи таблетки — як про подвиг. Про здоров'я автора не жартуй." },
   // Before "порада" and "плітки" ("порадуйте", "розкажи"): "розкажіть шось хороше" (25.09.2026) — Ukrainian and Russian: хороше/хорошее, приємне/приятное, порадуйте, втіште/утешьте…
   { key: "хороше", re: W("хорош|приємн|приятн|позитив|радіс|радост|порадуй|порадувати|порадовать|втіш|утеш|потіш|тепле|тепл[оеі]го|добре слово|доброе слово|(?:щось|шось|що-небудь|что-то|чтото|что-нибудь|шото) добр"),
-    hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном." },
-  { key: "порада", re: W("порад|що робити|шо робити|як бути|підкажи|посовітуй|допоможи"),
-    hint: "Тема — порада: дай життєву пораду з досвіду бабці — корисну, але смішну." },
+    hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
+  // "тег + совет / порада / порекомендуй…" (25.09.2026): Ukrainian and Russian, a different kind of advice each time.
+  // If they asked about something concrete, the advice is about exactly that.
+  { key: "порада", re: W("порад|порекоменд|рекоменд|що робити|шо робити|як бути|підкаж|посовіту|совіту|совет|посовет|совєт|посовєт|присовєт|подскаж|что делать|шо делать|как быть|допоможи|помоги"),
+    hint: [
+      "Тема — порада: життєва порада з бабциного досвіду — корисна, але смішна. Якщо спитали про щось конкретне — саме про це.",
+      "Тема — порада з побуту: справжня робоча хитрість (пляма, хліб, сусіди, комуналка — або те, про що спитали), з бурчанням.",
+      "Тема — «три правила бабці»: три короткі пункти про те, що спитали (чи про життя взагалі), третій абсурдний.",
+      "Тема — порада, як у журналі «Робітниця» 1987 року: пафосно, канцеляритом, про те, що спитали.",
+      "Тема — порада-притча: коротка історія з бабциного життя з мораллю наприкінці, що пасує до питання.",
+    ] },
   { key: "плітки", re: W("пліт|новин|що нового|шо нового|розкажи|хто там"),
     hint: "Тема — плітки: переказуй «новини двору» загально й вигадано, без імен і реальних фактів про людей." },
-  { key: "пророцтво", re: W("що буде|шо буде|завтра|передбач|пророк|майбутн|ворож"),
+  { key: "пророцтво", re: W("що буде|шо буде|завтра|передбач|пророк|майбутн"),
     hint: "Тема — пророцтво: передбач авторові чи двору щось пафосне й абсурдне." },
 ];
 // "@бабця + surname" — fixed answers, word for word as the user set them (24.09.2026); checked before topics and fire
@@ -325,22 +361,23 @@ const WAR_FALLBACK = [
 export const warFallback = (play, chat) =>
   WAR_FALLBACK.reduce((s, [re, fn]) => s.replace(re, (m, e) => (chat.toLowerCase().includes(m.toLowerCase()) ? m : fn(m, e))), play);
 
-// A member who speaks but is missing from «Дійові особи» (Nina, 24.09.2026) gets a neutral line there. Only real
-// senders are checked, so a stray "Висновок:" never becomes a character.
-export function castFix(play, names) {
+// The «Дійові особи» block as lines (header first) through fn; no block → the play as is.
+const editCast = (play, fn) => {
   const start = play.indexOf("Дійові особи:");
   if (start < 0) return play;
-  const end = play.indexOf("\n\n", start);
-  const block = play.slice(start, end < 0 ? undefined : end);
-  const cast = new Set(block.split("\n").slice(1).map((l) => nameKey(castName(l))));
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const missing = names.filter((n) => !cast.has(nameKey(n)) && new RegExp(`^${esc(n)}(?: \\([^)\\n]*\\))?:`, "m").test(play));
-  if (!missing.length) return play;
-  const add = missing.map((n) => `${n} — голос із натовпу`).join("\n");
-  const others = block.lastIndexOf("\nта інші");
-  const fixed = others < 0 ? `${block}\n${add}` : `${block.slice(0, others)}\n${add}${block.slice(others)}`;
-  return play.slice(0, start) + fixed + play.slice(start + block.length);
-}
+  const end = play.indexOf("\n\n", start), stop = end < 0 ? play.length : end;
+  return play.slice(0, start) + fn(play.slice(start, stop).split("\n")).join("\n") + play.slice(stop);
+};
+
+// A member who speaks but is missing from «Дійові особи» (Nina, 24.09.2026) gets a neutral line there. Only real
+// senders are checked, so a stray "Висновок:" never becomes a character.
+export const castFix = (play, names) => editCast(play, (lines) => {
+  const cast = new Set(lines.slice(1).map((l) => nameKey(castName(l))));
+  const add = names.filter((n) => !cast.has(nameKey(n)) && new RegExp(`^${esc(n)}(?: \\([^)\\n]*\\))?:`, "m").test(play))
+    .map((n) => `${n} — голос із натовпу`);
+  const others = lines.findIndex((l) => l.startsWith("та інші"));
+  return others < 0 ? [...lines, ...add] : [...lines.slice(0, others), ...add, ...lines.slice(others)];
+});
 
 // «Дійові особи» line = "Name «tag» — role in today's story": the tag is the member's real one, put there by code;
 // the model writes only the role. "Lida — сарделька, яка знає ціну репутації" hurt (24.09.2026): if the role
@@ -358,33 +395,24 @@ const leansOnTag = (desc, tag) => tag.toLowerCase().split(",").some((t) => {
   return stems.every((w) => desc.toLowerCase().includes(w));
 });
 export function castClean(play, tags, names = []) {
-  const start = play.indexOf("Дійові особи:");
-  if (start < 0) return play;
   const real = new Map([...names, ...tags.keys()].map((n) => [nameKey(n), n]));
-  const end = play.indexOf("\n\n", start);
-  const block = play.slice(start, end < 0 ? undefined : end);
-  const fixed = block.split("\n").map((l) => {
+  return editCast(play, (lines) => lines.map((l) => {
     const name = real.get(nameKey(castName(l))), desc = l.match(CAST_LINE)[2];
     if (!name) return l;
     const tag = tags.get(name);
     return name + (tag ? ` «${tag}»` : "") + (desc && !(tag && leansOnTag(desc, tag)) ? ` — ${desc}` : "");
-  }).join("\n");
-  return play.slice(0, start) + fixed + play.slice(start + block.length);
+  }));
 }
 
 // «Дійові особи» in a new order every time, "та інші мешканці двору" stays last (user, 25.09.2026).
-export function castShuffle(play, rnd = Math.random) {
-  const start = play.indexOf("Дійові особи:");
-  if (start < 0) return play;
-  const end = play.indexOf("\n\n", start);
-  const [head, ...body] = play.slice(start, end < 0 ? undefined : end).split("\n");
+export const castShuffle = (play, rnd = Math.random) => editCast(play, ([head, ...body]) => {
   const rest = body.filter((l) => l.startsWith("та інші")), cast = body.filter((l) => !l.startsWith("та інші"));
   for (let i = cast.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [cast[i], cast[j]] = [cast[j], cast[i]];
   }
-  return play.slice(0, start) + [head, ...cast, ...rest].join("\n") + (end < 0 ? "" : play.slice(end));
-}
+  return [head, ...cast, ...rest];
+});
 
 // Everyone who wrote but isn't named anywhere in the play gets a roll-call remark before the moral, so nobody
 // finds out they "wrote nothing today" ("А я сьогодні ніхуя не писав виходить", 24.09.2026). A name counts as present
@@ -421,6 +449,58 @@ export function rollCall(play, names) {
 export function parseVote(text, n) {
   const [k, score] = (text.match(/\d+/g) ?? []).map(Number);
   return { best: k >= 1 && k <= n ? k - 1 : 0, score: score ?? 10 };
+}
+
+// The model garbles real names: "Ніркослав Нифонов" for "Николай Нифонов" (25.09.2026) — then the roll call
+// also missed him. Every member's name gets its exact spelling back, in plays and replies:
+// - two-word names: one word exact, the neighbour a garbled other word (same first letter, similar length) → full name;
+// - one-word Latin names of 6+ letters: a word 1–2 edits off with the same first letter → the name.
+// Cyrillic one-word names aren't touched: the model declines them («Олександра»), and that's correct.
+// ponytail: same-first-letter heuristic — a garbled first letter slips through.
+const editDistance = (a, b) => {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+};
+const garbled = (w, real, known) => w !== real && !known.has(w) && w[0].toLowerCase() === real[0].toLowerCase()
+  && w.length >= real.length / 2 && w.length <= real.length * 2;
+export function fixNames(text, names) {
+  const all = [...new Set(names)];
+  const known = new Set(all.flatMap((n) => n.split(/\s+/)));
+  for (const full of all) {
+    const words = full.split(/\s+/).filter((w) => /\p{L}/u.test(w));
+    if (words.length >= 2) {
+      const [first, last] = [words[0], words.at(-1)];
+      if (last.length >= 4) text = text.replace(new RegExp(`(?<![\\p{L}])(\\p{Lu}[\\p{L}'’-]+)\\s+${esc(last)}(?![\\p{L}])`, "gu"),
+        (m, w) => (garbled(w, first, known) ? `${words.slice(0, -1).join(" ")} ${last}` : m));
+      if (first.length >= 4) text = text.replace(new RegExp(`(?<![\\p{L}])${esc(first)}\\s+(\\p{Lu}[\\p{L}'’-]+)(?![\\p{L}])`, "gu"),
+        (m, w) => (garbled(w, last, known) && editDistance(w, last) <= Math.max(2, last.length / 3) ? `${first} ${words.slice(1).join(" ")}` : m));
+    } else if (/^[A-Za-z]{6,}$/.test(full)) {
+      text = text.replace(/(?<![\p{L}])[A-Za-z]{5,}(?![\p{L}])/gu, (w) => (garbled(w, full, known) && editDistance(w, full) <= 2 ? full : w));
+    }
+  }
+  return text;
+}
+
+// A tag inside a reply to another member: is the request for that member? (user's rules, 25.09.2026) Yes when the
+// message tags them (@username or a name tag), names them as in Telegram, uses a verb aimed at someone
+// ("вразумі", "буль", "заспокой", "видай", "пригости") or a verb + "їй/йому/їм" ("ну скажи їй"). Otherwise the brief decides.
+const AIMED = /(?<![\p{L}])(?:вразум|образум|буль(?![\p{L}])|заспокой|успокой|видай|выдай|пригост|угост)/iu;
+const AIMED_AT = /(?<![\p{L}])(?:скаж|дай|розкаж|расскаж|поясн|объясн|відповід|ответ|покаж|налий|налей|напиш)\p{L}*\s+(?:їй|йому|їм|ей|ему|им)(?![\p{L}])/iu;
+// ALIASES from wrangler.toml → Map(Telegram name → real-life forms): "дай ліді рецепт" as a reply to Lida is for
+// Lida, who is Ніна (25.09.2026) — the Telegram name alone can't tell.
+export const parseAliases = (s = "") => new Map(s.split(";").map((p) => p.split(":")).filter((p) => p.length === 2)
+  .map(([n, forms]) => [n.trim(), forms.split(",").map((f) => f.trim()).filter(Boolean)]));
+export function pointsAtOther(text, mentions, other, aliases = []) {
+  if (!other) return false;
+  const t = text.replace(/@babtsya_z_altanky_bot\b/gi, "");
+  if (mentions.some((m) => (m.id && m.id === other.uid) || (m.username && other.username && m.username.toLowerCase() === other.username.toLowerCase()))) return true;
+  if ([...other.name.split(/\s+/), ...aliases].some((w) => /^\p{L}{3,}$/u.test(w) && new RegExp(`(?<![\\p{L}])${w}(?![\\p{L}])`, "iu").test(t))) return true;
+  return AIMED.test(t) || AIMED_AT.test(t);
 }
 
 // The picture committee: three single-number answers (appetizing, realistic, flawless), averaged to one decimal.
@@ -463,7 +543,7 @@ export function copiedLines(play, chat, n = 6) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|РОЗБІР|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -548,7 +628,8 @@ if (import.meta.main) {
   assert.equal(grumbleSection(1110, 10), "вечір");
   assert.equal(grumbleSection(750, null), "обід");
   const teases = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30"].map(teaseMinute);
-  assert.equal(teases.filter((m) => m != null).length, 2, String(teases));
+  assert.equal(teases.filter((m) => m != null).length, 3, String(teases));
+  assert.equal(teases[0], 1290, String(teases)); // 25.09 at 21:30
   assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, 1020, 1110].includes(m))), String(teases));
   const neighbourDays = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"].map(neighbourMinute);
   assert.ok(neighbourDays.every((m) => m >= 540 && m < 1200 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900)), String(neighbourDays));
@@ -590,13 +671,13 @@ if (import.meta.main) {
   const castPlay = "Дійові особи:\nIvan M — месія\nPetro — критик\nта інші мешканці двору\n\nIvan M (патетично): Два рази!\nNina (насторожено): То ти до родичів?\nPetro: Я там був.\nМораль: ні.";
   assert.ok(castFix(castPlay, ["Ivan M", "Petro", "Nina", "Zina"]).includes("Petro — критик\nNina — голос із натовпу\nта інші мешканці двору"));
   assert.equal(castFix(castPlay, ["Ivan M", "Petro"]), castPlay);
-  const mp = mentionPrefix([{ name: "Taras", uid: 1 }, { name: "Hnat", uid: 2 }]);
-  assert.equal(mp.text, "Taras, Hnat, ");
-  assert.deepEqual(mp.entities.map((e) => [mp.text.slice(e.offset, e.offset + e.length), e.user.id]), [["Taras", 1], ["Hnat", 2]]);
+  const mp = mentionPrefix([{ name: "Bohdan", uid: 1 }, { name: "Hnat", uid: 2 }]);
+  assert.equal(mp.text, "Bohdan, Hnat, ");
+  assert.deepEqual(mp.entities.map((e) => [mp.text.slice(e.offset, e.offset + e.length), e.user.id]), [["Bohdan", 1], ["Hnat", 2]]);
   assert.deepEqual(mentionPrefix([]), { text: "", entities: [] });
   for (const t of ["@babtsya_z_altanky_bot тупа корова", "ану шо скажеш @babtsya_z_altanky_bot"]) assert.ok(addressesBot(t), t);
   for (const t of ["Бабця, пиздани дєда!", "цей бот тупий", "/babtsya", "/roast@babtsya_z_altanky_bot", "ну й що"]) assert.ok(!addressesBot(t), t);
-  assert.equal(tidy("Taras, @some_nick каже кава กาแฟ"), "Taras, some_nick каже кава ");
+  assert.equal(tidy("Bohdan, @some_nick каже кава กาแฟ"), "Bohdan, some_nick каже кава ");
   assert.equal(stripHints("ПРИЙОМ: Синку Lida, не крути сюжетом.\nОБРАЗ: Твої побажання — як недосмажені пиріжки.", "турецький серіал о сьомій"), "Синку Lida, не крути сюжетом.\nТвої побажання — як недосмажені пиріжки.");
   assert.equal(stripHints("ПРИЙОМ: Згідно з регламентом двору, Lida, іди на хер!\nОБРАЗ: лавка біля під'їзду", "лавка біля під'їзду"), "Згідно з регламентом двору, Lida, іди на хер!");
   assert.ok(!finalize("ОБРАЗ ДНЯ: тонометр\nБабця з альтанки представляє\n\nтекст").includes("ОБРАЗ ДНЯ"));
@@ -610,7 +691,7 @@ if (import.meta.main) {
   assert.equal(dropName("Синку Lida, не крути сюжетом.", "Lida"), "Синку, не крути сюжетом.");
   assert.equal(dropName("Твій пінг — нафіг не здав, Iron Grey Owl!", "Iron Grey Owl, esquire"), "Твій пінг — нафіг не здав!");
   assert.equal(dropName("Mykola.Pr, мої думки чіткіші, ніж розклад.", "Mykola.Pr"), "Мої думки чіткіші, ніж розклад.");
-  assert.equal(dropName("Іди спати.", "Taras"), "Іди спати.");
+  assert.equal(dropName("Іди спати.", "Bohdan"), "Іди спати.");
   assert.equal(tidy("Синку, сядь. (Підказка лише для тебе: почни з наказу.)"), "Синку, сядь. ");
   assert.ok(IMAGES.length >= 12 && !IMAGES.some((i) => /голуб|ЖЕК|маршрутк/i.test(i)));
   assert.ok(REPLY_MOVES.rude.length >= 3 && REPLY_MOVES.wise.length >= 4 && [...REPLY_MOVES.rude, ...REPLY_MOVES.wise].every((m) => !/ти шо/i.test(m)));
@@ -644,6 +725,27 @@ if (import.meta.main) {
   assert.equal(topicFor("@babtsya_z_altanky_bot порадуйте нас хоч чимось", 9)?.key, "хороше");
   assert.equal(topicFor("@babtsya_z_altanky_bot скажи щось добре", 9)?.key, "хороше");
   assert.equal(topicFor("@babtsya_z_altanky_bot розкажи плітки", 9)?.key, "плітки");
+  assert.equal(topicFor("@babtsya_z_altanky_bot дай рецепт оладків на молоці?", 18)?.key, "рецепт");
+  assert.equal(topicFor("@babtsya_z_altanky_bot как приготовить борщ", 9)?.key, "рецепт");
+  assert.equal(topicFor("@babtsya_z_altanky_bot погадай мені", 9)?.key, "гадання");
+  assert.equal(topicFor("@babtsya_z_altanky_bot що приготувати на вечерю?", 18)?.key, "рецепт");
+  for (const q of ["напиши вірш про Лиду", "скажи тост", "привітай Ніну з днем народження", "поздравь с днюхой"])
+    assert.equal(topicFor(`@babtsya_z_altanky_bot ${q}`, 9)?.key, "вірш", q);
+  assert.equal(topicFor("@babtsya_z_altanky_bot мені наснилось, шо я літаю", 9)?.key, "сон");
+  assert.equal(topicFor("@babtsya_z_altanky_bot розтлумач сон", 9)?.key, "сон");
+  assert.notEqual(topicFor("@babtsya_z_altanky_bot вітер стихло і тостер зламався", 9)?.key, "вірш");
+  assert.equal(topicFor("@babtsya_z_altanky_bot поворожи на кохання", 9)?.key, "гадання");
+  assert.equal(topicFor("@babtsya_z_altanky_bot таро на тиждень", 9)?.key, "таро");
+  assert.equal(topicFor("@babtsya_z_altanky_bot а шо по гороскопу", 9)?.key, "гороскоп");
+  for (const q of ["дай совет", "дай пораду", "порекомендуй щось", "що порадиш?", "подскажи, что делать", "посоветуй фильм", "рекомендуй серіал"])
+    assert.equal(topicFor(`@babtsya_z_altanky_bot ${q}`, 9)?.key, "порада", q);
+  assert.notEqual(topicFor("@babtsya_z_altanky_bot я гадаю, ти дурна", 9)?.key, "гадання"); // "гадаю" = "I think"
+  assert.ok(REPLY_TOPICS.filter((t) => Array.isArray(t.hint)).every((t) => t.hint.length >= 5));
+  // Ready-made openers and examples in moves and tones get copied word for word (25.09.2026): none may come back.
+  assert.ok([...REPLY_MOVES.rude, ...REPLY_MOVES.wise, ...Object.values(REPLY_TONES)].every((h) => !/«[^»]*(?:…|\?)»/.test(h)));
+  // Stock examples in hints get copied into every answer (tarot cards, 25.09.2026): none may come back.
+  assert.ok(REPLY_TOPICS.every((t) => ![].concat(t.hint).some((h) => /Сусід з перфоратором|Туз комуналки|Королева черги|Лавковий Козеріг/.test(h))));
+  assert.ok(REPLY_TOPICS.filter((t) => ["рецепт", "хороше"].includes(t.key)).every((t) => t.hint.includes("легкі беззлобні підколки")));
   assert.equal(topicFor("@babtsya_z_altanky_bot ну шо скажеш", 10), null);
   assert.ok(REPLY_TOPICS.every((t) => !/у колясочній|на акції в АТБ\)/.test(t.hint)));
   assert.ok(REPLY_MOVES.rude.length >= 10 && REPLY_MOVES.wise.length >= 20 && IMAGES.length >= 50);
@@ -697,6 +799,35 @@ if (import.meta.main) {
   assert.equal(committeeScore(["7", "8.", "Score: 9"]), 8);
   assert.equal(committeeScore(["3", "не знаю", "10"]), 6.5);
   assert.equal(committeeScore(["", "0", "11"]), null);
+  const lida = { name: "Lida 🐸 Kit", username: "lida_k", uid: 7 };
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot вразумі її", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot ну скажи їй щось", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot ану видай Олі пігулок", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot буль ласка", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot @lida_k подивись", [{ username: "lida_k" }], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot а ти що скажеш", [{ id: 7 }], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Lida шось", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot шо скажеш, бабцю?", [], lida), false);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot дай рецепт", [], lida), false);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot вразумі її", [], null), false);
+  const al = parseAliases("Lida 🐸 Kit: Ліда, Ліді, Лідусю; Taras: Тарасик");
+  assert.deepEqual(al.get("Lida 🐸 Kit"), ["Ліда", "Ліді", "Лідусю"]);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot дай ліді рецепт", [], lida, al.get("Lida 🐸 Kit")), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot дай ліді рецепт", [], lida), false);
+  assert.equal(parseAliases("").size, 0);
+  // Two Nina share "Олі": the reply decides — only the replied member's forms count (25.09.2026).
+  const two = parseAliases("Lida 🐸 Kit: Оля, Олі; Zina Kovalchuk: Оля, Олі, Ковальчук");
+  const zina = { name: "Zina Kovalchuk", username: "zina", uid: 8 }, taras = { name: "Taras", username: "t", uid: 9 };
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], lida, two.get(lida.name)), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], zina, two.get(zina.name)), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], taras, two.get(taras.name)), false);
+  const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Sergio Garcia Lopez"];
+  assert.equal(fixNames("(Ніркослав Petrenko показав фото.)", ["Николай Petrenko"]), "(Николай Petrenko показав фото.)");
+  assert.equal(fixNames("(Ніркослав Нифонов показав фото тварини.)", ["Николай Нифонов"]), "(Николай Нифонов показав фото тварини.)");
+  assert.equal(fixNames("Nena Petrenko: Ну! Nina Petrenkov мовчить.", crew), "Nina Petrenko: Ну! Nina Petrenko мовчить.");
+  assert.equal(fixNames("Bohdann: Корпус! А Bohdan мовчить.", crew), "Bohdan: Корпус! А Bohdan мовчить.");
+  assert.equal(fixNames("Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.", crew), "Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.");
+  assert.equal(fixNames("Sergio Garcia Lopez: Ліцензія! Taras: Так.", crew), "Sergio Garcia Lopez: Ліцензія! Taras: Так.");
   assert.equal(stageHead("«Назва»\n\nДійові особи:\nA — а\n\n(Сцена 1. Нічна дифузія мозку. Темно.)\nA: Ну!", "сусідський кіт", "Нічна зміна"),
     "«Назва»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці біля АТБ. Образ дня — сусідський кіт.\n\n(Сцена 1. Нічна зміна. Темно.)\nA: Ну!");
   const staged = "«Н»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці. Кіт.\n\n(Сцена 1. Ранок.)";

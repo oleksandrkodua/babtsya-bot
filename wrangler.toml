@@ -7,7 +7,7 @@ preview_urls = false
 # Every 30 min; the Worker itself decides by Kyiv time (13:00–16:00 midday, 22:00–23:00 evening,
 # grumbles every 90 min 08:00–21:30).
 [triggers]
-crons = ["0,30 * * * *"]
+crons = ["0,30 * * * *", "58 20 25 9 *"] # 2nd: one-off poll 25.09 23:58 Kyiv (20:58 UTC) — remove after 26.09
 
 [ai]
 binding = "AI"
@@ -28,7 +28,9 @@ fallthrough = true
 FEMALE_NAMES = "" # women in your group by display name, comma-separated
 GROUP_CHAT_ID = "-100XXXXXXXXXX" # your group id: DEPLOY.md, stages 2 and 6
 TEST_CHAT_ID = "0" # your private chat with the bot, for TEST_MODE = "1"
-TEASE = "" # optional: a tease sent every third day at 16:00-23:00
+# Real-life names members are called by, "Name in Telegram: form, form; …" — whom "дай ліді рецепт" is for.
+ALIASES = "" # optional: "Name in Telegram: nickname, nickname; ..."
+TEASE = "" # optional: a tease sent every second day at 16:00-23:00
 TEST_MODE = "0" # 0 — вижимки йдуть у групу GROUP_CHAT_ID; 1 — тобі в особисті
 
 # Keep the Worker's console.log history (dashboard → babtsya-bot → Logs), 3 days on the free plan:
