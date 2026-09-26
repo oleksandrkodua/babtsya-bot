@@ -32,7 +32,7 @@
 
 **[я]** Уже в теці:
 - `wrangler.toml` — конфіг: база D1, Workers AI, запуск кожні пів години `0,30 * * * *`, змінні `GROUP_CHAT_ID` (зараз — тестова група), `TEST_CHAT_ID`, `TEST_MODE = "1"`;
-- `schema.sql` — таблиці `messages`, `digests`, `people`, `polls`, `pics`, `usage`. Оновлюєш існуючу базу з версії до 25.09 — один раз виконай `npx wrangler d1 execute babtsya --remote --command "ALTER TABLE pics ADD COLUMN data TEXT"`, потім `schema.sql` (він створює лише відсутні таблиці);
+- `schema.sql` — таблиці `messages`, `digests`, `people`, `polls`, `pics`, `usage`, `chronicle`, `people_notes`. Оновлюєш існуючу базу з версії до 25.09 — один раз виконай `npx wrangler d1 execute babtsya --remote --command "ALTER TABLE pics ADD COLUMN data TEXT"`, потім `schema.sql` (він створює лише відсутні таблиці);
 - `src/pipeline.js` — уся обробка тексту: фільтри, редакція, коректор, довжина. Перевіряється без Cloudflare: `node src/pipeline.js`;
 - `src/index.js` — webhook, розклад, модель, відправка. Промпти бере з тих самих `prompts/`, що й тестовий стенд.
 

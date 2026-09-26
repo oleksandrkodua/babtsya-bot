@@ -6,8 +6,8 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, fixedReply, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, fixedIsBare, fixedFor, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -18,9 +18,6 @@ const MIDDAY_MINUTE = 13 * 60; // ponytail: one shot, no retry — if it fails, 
 const EVENING_MIN = 50; // below it the evening is skipped and messages roll into the next digest
 const GRUMBLES = parseGrumbles(grumblesText);
 const POLL_MINUTE = 21 * 60; // «зрада чи перемога» at 21:00 Kyiv
-// ponytail: one-off (user, 25.09.2026) — that day's poll at 23:58 (its own cron) instead of 21:00, closed 26.09 at 07:00.
-// Self-expiring by date; delete this and the second cron in wrangler.toml after 26.09.
-const POLL_LATE = { cron: "58 20 25 9 *", day: "2026-09-25", closeDay: "2026-09-26", closeMinute: 7 * 60 };
 const COPY_MAX = 2; // more copied replicas than this → one rewrite call (25.09.2026)
 // Second corrector pass on plays only: the first one kept missing agreement and the vocative (25.09.2026).
 const AGREE_PASS = "\n\nЦе другий прохід: перший коректор уже працював. Шукай ЛИШЕ порушення узгодження роду, числа й відмінка та звертання не в кличному відмінку. Решту не чіпай; якщо таких помилок нема — НЕМАЄ.";
@@ -36,8 +33,8 @@ const REPLY_GOOD = 7; // judge score 1–10
 const REPLY_BUDGET_MS = 10000;
 const REPLY_DEADLINE_MS = 22000;
 const REPLY_PAUSE_MS = 2000;
-const BRIEF = "Ти — уважна сусідка, що стежить за чатом. Тобі дають розмову в сусідському чаті й повідомлення до бабці. Напиши для бабці розбір — короткі рядки, сухо, без жартів:\n1. Про що зараз розмова.\n2. ПИТАННЯ: що саме автор питає, просить чи стверджує — одним реченням з усіма деталями («чи виграє збірна України», а не просто «таро»); про кого йдеться — один чоловік, одна жінка чи кілька людей; прізвиська розшифруй. Якщо автор поправляє бабцю чи пояснює слово («сємки — це насіння») — ця поправка головна.\n3. СУТЬ ВІДПОВІДІ: сам зміст відповіді — конкретно: цифра, так чи ні, назва, порада, думка («8 гривень», «так, виграє 2:1», «кіт розумніший»), одним-двома реченнями, сухо — це сировина, бабця сама переплавить її в стиль. Не переказуй питання («відповідь на питання про…» — так не можна). Не знаєш точно — все одно назви конкретну найімовірнішу відповідь (цифру, так чи ні, назву) і лише поруч познач «бабця не певна»; «невідомо», «ніхто не знає», «важко сказати» писати не можна. На питання — прямо (так чи ні, скільки, як, що порадити), хай про що воно; на твердження чи підколку — з чим бабця згодна чи ні й чому. Навіть дурне питання чи жарт отримує пряму відповідь.\n4. Конкретний смішний кут: деталь, протиріччя чи абсурд саме цього питання, за який бабці зачепитися. Він є завжди — знайди його; «відсутній» писати не можна.\n5. Адресат. Якщо повідомлення автора — відповідь іншій людині і автор просить бабцю щось сказати, дати чи зробити саме їй («видай Олі пігулок», «скажи їй»), напиши «Адресат: ІНШИЙ». Інакше — «Адресат: АВТОР».\nНічого не вигадуй — лише те, що є в розмові.";
-const JUDGE = "Ти — редактор гумору. Тобі дають розмову в сусідському чаті, повідомлення до бабці й кілька варіантів її відповіді. Оціни кожен від 1 до 10. 1) Чи відповідає варіант на те, що спитали чи сказали (ПИТАННЯ з розбору), конкретно — цифрою, так чи ні, назвою, порадою: ні, або «ніхто не знає» — щонайбільше 3 бали, хай який смішний. 2) Стиль Подерв'янського (пафос, гротеск, суржик, соковитий мат, абсурдне «а отже»): прісна «нормальна» відповідь — щонайбільше 5; сухий факт-довідка на початку — мінус два. 3) Смішно, несподівано й у тему розмови. Мінус бали: не той рід чи граматика, вигадані факти про реальних людей, повтори слів, пояснення жарту; заїжджений образ (банки, огірки, соління, голуби, ЖЕК, «Електрон»), якого нема в розмові, — мінус три. Відповідай одним рядком: номер найкращого варіанта й його оцінка, наприклад «2 8». Нічого більше.";
+const BRIEF = "Ти — уважна сусідка, що стежить за чатом. Тобі дають розмову в сусідському чаті й повідомлення до бабці. Напиши для бабці розбір — короткі рядки, сухо, без жартів:\n1. Про що зараз розмова.\n2. ПИТАННЯ: що саме автор питає, просить чи стверджує — одним реченням з усіма деталями («чи виграє збірна України», а не просто «таро»); про кого йдеться — один чоловік, одна жінка чи кілька людей; прізвиська розшифруй. Якщо автор поправляє бабцю чи пояснює слово («сємки — це насіння») — ця поправка головна.\n3. СУТЬ ВІДПОВІДІ: сам зміст відповіді — конкретно: цифра, так чи ні, назва, порада, думка («8 гривень», «так, виграє 2:1», «кіт розумніший»), одним-двома реченнями, сухо — це сировина, бабця сама переплавить її в стиль. Не переказуй питання («відповідь на питання про…» — так не можна). Не знаєш точно — все одно назви конкретну найімовірнішу відповідь (цифру, так чи ні, назву) і лише поруч познач «бабця не певна»; «невідомо», «ніхто не знає», «важко сказати» писати не можна. На питання — прямо (так чи ні, скільки, як, що порадити), хай про що воно; на твердження чи підколку — з чим бабця згодна чи ні й чому. Навіть дурне питання чи жарт отримує пряму відповідь.\n4. Конкретний смішний кут: деталь, протиріччя чи абсурд у самому предметі — людині, події, речі, про які питають (не про форму питання: «коротке», «без дієслова», «як звіт» — так не можна). Він є завжди — знайди його; «відсутній» писати не можна.\n5. ПАМ'ЯТЬ: якщо в ХРОНІЦІ ДВОРУ чи в тому, ЩО БУЛО В ДВОРІ, є історія, мем чи прізвисько, що пасує саме до цього питання, — одним рядком яке; не пасує нічого — «—». Минуле не тягни, де воно не до речі.\n6. Адресат. Якщо повідомлення автора — відповідь іншій людині і автор просить бабцю щось сказати, дати чи зробити саме їй («видай Олі пігулок», «скажи їй»), напиши «Адресат: ІНШИЙ». Інакше — «Адресат: АВТОР».\nНічого не вигадуй — лише те, що є в розмові.";
+const JUDGE = "Ти — редактор гумору. Тобі дають розмову в сусідському чаті, повідомлення до бабці й кілька варіантів її відповіді. Оціни кожен від 1 до 10. 1) Чи відповідає варіант на те, що спитали чи сказали (ПИТАННЯ з розбору), конкретно — цифрою, так чи ні, назвою, порадою: ні, або «ніхто не знає» — щонайбільше 3 бали, хай який смішний. 2) Стиль Подерв'янського (пафос, гротеск, суржик, соковитий мат, абсурдне «а отже»): прісна «нормальна» відповідь — щонайбільше 5; сухий факт-довідка на початку — мінус два. 3) Смішно, несподівано й у тему розмови. Мінус бали: не той рід чи граматика, вигадані факти про реальних людей, повтори слів, пояснення жарту, шаблонний фінал «…, блядь, суцільний …» — мінус два; заїжджений образ (банки, огірки, соління, голуби, ЖЕК, «Електрон»), якого нема в розмові, — мінус три. Відповідай одним рядком: номер найкращого варіанта й його оцінка, наприклад «2 8». Нічого більше.";
 // Pictures (25.09.2026): a poster before the evening play, a meat photo with the Lida tease. FLUX.1 schnell on
 // Workers AI, ~60 neurons a picture by Cloudflare's price list. No text in the picture (the model garbles letters),
 // no real people — the caption carries the words.
@@ -101,6 +98,8 @@ export default {
       }
       // ?kind=poll[&to=group] — one poll now, same as the 21:00 one.
       if (kind === "poll") return new Response(await poll(env, toGroup));
+      // ?kind=chronicle — rebuild the yard's chronicle now and see it here (no chat).
+      if (kind === "chronicle") return new Response(await chronicle(env).catch((e) => `chronicle: помилка — ${e.message}`));
       // ?kind=stock — one more scored meat picture into the stock (D1 only, no chat).
       if (kind === "stock") return new Response(await stockMeat(env));
       // ?kind=poster[&title=«…»][&to=me] and ?kind=tease[&to=me] — one picture now; to=me goes to your private chat.
@@ -120,10 +119,8 @@ export default {
   },
 
   async scheduled(controller, env) {
-    if (controller.cron === POLL_LATE.cron) return console.log(await poll(env));
     const now = new Date(controller.scheduledTime); // cron runs at :00 and :30
     const { day, hour } = kyiv(now);
-    if (day === POLL_LATE.closeDay && slotMinute(now) === POLL_LATE.closeMinute) await closePoll(env, POLL_LATE.day).catch((e) => console.log("poll close:", e.message));
     const pending = () => env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE ts < ?").bind(Math.floor(now / 1000)).first("n");
     const done = (kind) => env.DB.prepare("SELECT 1 FROM digests WHERE day = ? AND kind = ?").bind(day, kind).first();
     let posted = false;
@@ -147,7 +144,8 @@ export default {
       const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM pics WHERE kind = 'meat' AND used IS NULL").first("n").catch(() => STOCK_MIN);
       if (left < STOCK_MIN) console.log(await stockMeat(env).catch((e) => `stock: ${e.message}`));
     }
-    if (slotMinute(now) === POLL_MINUTE && day !== POLL_LATE.day) console.log(await poll(env));
+    if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) console.log(await chronicle(env).catch((e) => `chronicle: ${e.message}`));
+    if (slotMinute(now) === POLL_MINUTE) console.log(await poll(env));
   },
 };
 
@@ -249,10 +247,12 @@ const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2:
 // other = the member the tagged message replies to ({ name, text, id }): "@бабця видай Олі пігулок" as a reply to
 // Nina is meant for Nina (25.09.2026) — the brief decides whom she answers.
 async function compose(env, name, raw, botText, temperature = REPLY_TEMP, context = "", other = null, draftsN = REPLY_DRAFTS) {
-  const fixed = fixedReply(raw); // "@бабця + surname": the user's own answer, no model
-  if (fixed) return { tone: "фраза", text: fixed };
+  const rule = fixedFor(raw), fixed = rule?.text; // "@бабця + surname": the user's own answer
+  if (fixed && (rule.always || fixedIsBare(raw))) return { tone: "фраза", text: fixed }; // just the name (or Порошенко) — word for word
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  const topic = topicFor(raw, kyiv(new Date()).hour); // "@бабця + word": a matching topic replaces the random move
+  // With more than the name the fixed phrase leads and the model carries on: "шизік, знов дуріє…" (26.09.2026).
+  const topic = fixed ? { key: "фраза+", hint: `Про цю людину в бабці одна думка — «${fixed}». Почни відповідь дослівно з «${fixed}» і розвинь далі по суті того, що спитали, українською, у стилі Подерв'янського.${rule.angles ? " Розвивай за напрямком із розбору (ПАМ'ЯТЬ і СУТЬ), своїми словами, не дослівно." : ""}` }
+    : topicFor(raw, kyiv(new Date()).hour); // "@бабця + word": a matching topic replaces the random move
   const tone = !["хороше", "рецепт", "вірш"].includes(topic?.key) && Math.random() < RUDE_SHARE ? "rude" : "wise"; // never rude for "good" or a recipe
   // Who in the conversation is a woman, so a mentioned member gets the right gender and case (25.09.2026).
   const gender = genderLine([name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean), femaleSet(env.FEMALE_NAMES));
@@ -264,7 +264,11 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // 1. What's going on, what's asked, who's who ("тарас" is one man) — the drafts answer the brief, not raw lines.
   const local = replyPrompt.match(/^Місцеві слова:.*$/m)?.[0] ?? "";
   // Always, not only with chat context: a bare "чи женимо тарас?" got a generic threat instead of an answer (25.09.2026).
-  const brief = (await ai(env, `${BRIEF}\n${local}`, `${talk}${asked}`, 0.2, 350, REPLY_PAUSE_MS)).trim();
+  // One direction per reply, picked by code: with the whole list the brief copied all of it and every answer about
+  // Зеленський was the tennis with Єрмак (26.09.2026).
+  const angle = rule?.angles ? pick(rule.angles.split(";").map((a) => a.trim())) : "";
+  const opinion = fixed ? `\n(бабцина думка про цю людину: «${fixed}»${angle ? `; цього разу зачепися за: ${angle} — або придумай свій кут у цьому дусі` : ""})` : "";
+  const brief = (await ai(env, `${BRIEF}\n${local}`, `${await memory(env)}${talk}${asked}${opinion}`, 0.2, 400, REPLY_PAUSE_MS)).trim();
   const ctx = `${talk}${brief ? `РОЗБІР (для тебе, у відповідь не переписуй):\n${brief}\n\n` : ""}`;
   const to = other && (other.forced || /Адресат:\s*ІНШ/i.test(brief)) ? other.name : name;
   const woman = isFemale(to, femaleSet(env.FEMALE_NAMES));
@@ -294,6 +298,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // Same corrector as the plays: replies went straight out and "той розписка" got caught by the group (24.09.2026).
   if (Date.now() - start < REPLY_DEADLINE_MS)
     text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, gender + text, 0.2, 300, REPLY_PAUSE_MS)), { protectedTerms: [name, BOT_NAME] }).text;
+  if (fixed && !text.toLowerCase().startsWith(fixed.toLowerCase())) text = `${fixed[0].toUpperCase()}${fixed.slice(1)}. ${text}`; // the phrase always leads
   text = fixNames(text, [name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean));
   return { tone: topic?.key || tone, text: dropName(text, to).slice(0, long ? 1500 : 500), brief, score, to };
 }
@@ -374,7 +379,8 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   // Past BIG_DAY the raw chat drowns the writer: it transcribes instead of writing.
   const chatPart = writerLines.length <= BIG_DAY ? header + writerChat : "не надано — день великий, пиши лише за планом; найкраща фраза кожної теми в плані дослівна";
   const image = IMAGES[Math.floor(Math.random() * IMAGES.length)], night = nightLine(writerLines);
-  let play = await ai(env, writePrompt, `ОБРАЗ ДНЯ: ${image}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${night}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
+  const chron = await env.DB.prepare("SELECT text FROM chronicle ORDER BY created DESC LIMIT 1").first("text").catch(() => null);
+  let play = await ai(env, writePrompt, `${chron ? `ХРОНІКА ДВОРУ (давні історії й меми):\n${chron}\n\n` : ""}ОБРАЗ ДНЯ: ${image}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${night}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP);
   if (!play) return { error: "п'єса" };
 
   if (play.length > HARD_LIMIT) {
@@ -424,6 +430,41 @@ async function ai(env, system, user, temperature, max_tokens = 6000, pause = 200
     }
   }
   return "";
+}
+
+// Memory for a tag reply (26.09.2026): B — the yard's chronicle, A — the last six digests' topics and endings.
+// Both come from plans already stored in digests; a missing table just means no memory.
+async function memory(env) {
+  const chron = await env.DB.prepare("SELECT text FROM chronicle ORDER BY created DESC LIMIT 1").first("text").catch(() => null);
+  const { results } = await env.DB.prepare("SELECT day, kind, plan FROM digests WHERE plan IS NOT NULL ORDER BY created DESC LIMIT 6").all().catch(() => ({ results: [] }));
+  const recent = recentMemory(results);
+  return `${chron ? `ХРОНІКА ДВОРУ (давні історії й меми):\n${chron}\n\n` : ""}${recent ? `ЩО БУЛО В ДВОРІ ОСТАННІМИ ДНЯМИ:\n${recent}\n\n` : ""}`;
+}
+
+// B: every Monday the week's plans are folded into the previous chronicle — stories that run between days, memes,
+// local words, nicknames. Cumulative, so after a month she knows the chat. No health, family or private life.
+const CHRONICLE = "Ти — літописиця двору. Тобі дають попередню хроніку двору й плани випусків за тиждень. Онови хроніку: до 15 коротких пунктів, кожен рядок починається з «- ». Лише життя двору: історії, що тягнуться між днями, повторювані жарти й меми, місцеві слова й прізвиська, спільні справи сусідів. Нове додай, застаріле й разове прибери. НЕ пиши: новини, політику, війну, обстріли, зброю, фронт; адреси й телефони; оцінки людей; як влаштований сам бот чи коли він що публікує. Без заголовків, без зірочок і жирного — лише рядки «- …».";
+// C (off unless PEOPLE_NOTES = "1"): what each member is known for. Stored, read nowhere yet.
+const NOTES = "Тобі дають плани випусків сусідського чату за тиждень. Для кожного учасника, що там є, напиши один рядок «Ім'я: …» — чим він відомий у дворі: теми, захоплення, повторювані жарти, улюблені слівця. Без здоров'я, родини, адрес, роботи, грошей, оцінок і особистого життя. Лише рядки «Ім'я: …», нічого більше.";
+async function chronicle(env) {
+  const now = Math.floor(Date.now() / 1000);
+  const { results } = await env.DB.prepare("SELECT day, kind, plan FROM digests WHERE plan IS NOT NULL AND created >= ? ORDER BY created").bind(now - 7 * 86400).all();
+  if (!results.length) return "chronicle: нема планів за тиждень";
+  const week = results.map((r) => `${r.day} ${r.kind}:\n${r.plan}`).join("\n\n").slice(0, 40000);
+  const prev = await env.DB.prepare("SELECT text FROM chronicle ORDER BY created DESC LIMIT 1").first("text");
+  // Only "- " lines survive: headings, a bare "—" (the empty previous chronicle echoed) and markdown stars go (26.09.2026).
+  const text = tidy(await ai(env, CHRONICLE, `ПОПЕРЕДНЯ ХРОНІКА:\n${prev || "(ще нема)"}\n\nПЛАНИ ЗА ТИЖДЕНЬ:\n${week}`, 0.3, 1200))
+    .split("\n").map((l) => l.replace(/[*#_]/g, "").trim()).filter((l) => /^[-•]\s*\S/.test(l)).map((l) => l.replace(/^[-•]\s*/, "- ")).join("\n").slice(0, 3000);
+  if (!text) return "chronicle: модель нічого не дала";
+  await env.DB.prepare("INSERT INTO chronicle (week, text, created) VALUES (?, ?, ?) ON CONFLICT(week) DO UPDATE SET text = excluded.text, created = excluded.created")
+    .bind(kyiv(new Date()).day, text, now).run();
+  let notes = 0;
+  if (env.PEOPLE_NOTES === "1") {
+    const lines = (await ai(env, NOTES, week, 0.3, 1200)).split("\n").map((l) => l.match(/^\s*(.{2,40}?):\s*(.{5,300})$/)).filter(Boolean);
+    if (lines.length) await env.DB.batch(lines.map(([, name, note]) => env.DB.prepare("INSERT INTO people_notes (name, notes, updated) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET notes = excluded.notes, updated = excluded.updated").bind(name.trim(), note.trim(), now)));
+    notes = lines.length;
+  }
+  return `chronicle: ${text.length} символів${env.PEOPLE_NOTES === "1" ? `, нотаток про людей: ${notes}` : ""}\n${text}`;
 }
 
 // A picture as base64 JPEG, or null — a failed picture never blocks the text it goes with.

@@ -33,7 +33,7 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже" };
 // "Бабця, ти сьогодні…" — addressing her needs the vocative (25.09.2026). Only at the start of a line or a reply,
 // so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
 const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
@@ -309,20 +309,32 @@ export const REPLY_TOPICS = [
 // only when the message is that one word.
 const WE = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})(?![\\p{L}])`, "iu"); // whole words, for short or ambiguous stems
 export const FIXED_REPLIES = [
-  { re: W("зеленськ|зеленск|зелю|зєл[юяі]|zelensk"), alt: WE("зеля|зелі|зелька|зелик|зе"), text: "заїбав вже" },
-  { re: W("порошенк|poroshenk"), only: ["порох"], text: "найкращій президент" },
+  // angles: what she goes on about when the tag has more than the name — directions, not lines to copy (user, 26.09.2026).
+  { re: W("зеленськ|зеленск|зелю|зєл[юяі]|zelensk"), alt: WE("зеля|зелі|зелька|зелик|зе"), text: "заїбав вже",
+    angles: "знову не бачив, як навколо крадуть; знову кудись полетів; знову відмазує друзів; грає в теніс з Єрмаком" },
+  { re: W("порошенк|poroshenk"), only: ["порох"], text: "найкращій президент", always: true }, // always word for word
   { re: W("ющенк|yushchenk"), alt: WE("ющ|юща|ющу|ющем|ющеві"), text: "так" },
-  { re: W("путін|путин|путлер|пуйл|бункерн|putin"), alt: WE("ввп|хуйло"), only: ["моль"], text: "хуйло" },
-  { re: W("трамп|трумп|trump|рудий|рудого|рудому|рижий|рыжий|рыжего"), text: "шизік" },
+  { re: W("путін|путин|путлер|пуйл|бункерн|putin"), alt: WE("ввп|хуйло"), only: ["моль"], text: "хуйло",
+    angles: "знову несе хуйню; знову погрожує всьому світу; сидить у бункері й боїться власної тіні" },
+  { re: W("трамп|трумп|trump|рудий|рудого|рудому|рижий|рыжий|рыжего"), text: "шизік",
+    angles: "знову дуріє; бомбив Іран; тягне гроші звідусіль; вводить мита на все підряд" },
   { re: W("д[іи][\\s-]?дже[йяюєї]"), alt: WE("dj"), text: "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!" },
   // Whole surname forms only: "Федорівна" (patronymic) and "Федір" (first name) must not trigger.
   { re: WE("федоров|федорова|федорову|федоровим|федорові|федорів|федорових|fedorov"), text: "роль кібербезпеки трохи перебільшена" },
   { re: W("(?:бре+д+|брэ+д+|bra+d+)\\p{L}*[\\s-]*(?:пі+т+|пи+т+|пє+т+|pi+t+)"), text: "справжній мущина" },
 ];
-export const fixedReply = (text) => {
+export const fixedFor = (text) => {
   const t = text.replace(/@\w+/g, "");
   const bare = t.replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
-  return FIXED_REPLIES.find((f) => f.re.test(t) || f.alt?.test(t) || f.only?.includes(bare))?.text || null;
+  return FIXED_REPLIES.find((f) => f.re.test(t) || f.alt?.test(t) || f.only?.includes(bare)) || null;
+};
+// Just the name ("@бабця трамп") → the fixed phrase alone. More than the name ("шо там трамп?") → the phrase stays the
+// opening and the model goes on about what was asked: "шизік, знов дуріє…" (user, 26.09.2026).
+export const fixedIsBare = (text) => {
+  let t = text.replace(/@\w+/g, "");
+  if (FIXED_REPLIES.some((f) => f.only?.includes(t.replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase()))) return true; // "порох" alone
+  for (const f of FIXED_REPLIES) for (const re of [f.re, f.alt].filter(Boolean)) t = t.replace(new RegExp(`${re.source}\\p{L}*`, "giu"), " ");
+  return !/\p{L}{2,}/u.test(t);
 };
 
 export const topicFor = (text, hour) =>
@@ -347,6 +359,18 @@ const REPOST_MSG = /^\[\d\d:\d\d\] [^:]+: \[переслав /;
 export const withoutReposts = (lines) => lines.filter((l) => !REPOST_MSG.test(l));
 
 // Topic titles and endings of the previous digest, so the secretary recognises continuations.
+// A: the last digests' topics and endings for a tag reply, newest first, dated, capped (26.09.2026) — the plans are
+// already in D1 (digests.plan), nothing new is stored for this.
+export function recentMemory(rows, max = 1500) {
+  const out = [];
+  for (const { day, kind, plan } of rows) {
+    const keep = plan.split("\n").map((l) => l.trim()).filter((l) => /^\d+\.\s/.test(l) || l.startsWith("Чим закінчилось:"))
+      .map((l) => l.replace(/^Чим закінчилось:\s*/, "  → "));
+    if (keep.length) out.push(`${day.slice(8, 10)}.${day.slice(5, 7)} ${kind === "midday" ? "вдень" : "ввечері"}:\n${keep.join("\n")}`);
+  }
+  return out.join("\n").slice(0, max);
+}
+
 export const prevContext = (plan) => {
   const keep = plan.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("ЧАСТИНА ") || /^\d+\.\s/.test(l) || l.startsWith("Чим закінчилось:"));
   return keep.length ? `КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ (уже переказано; лише щоб упізнати продовження):\n${keep.join("\n").slice(0, 2500)}\n\n` : "";
@@ -543,7 +567,7 @@ export function copiedLines(play, chat, n = 6) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|ЩО БУЛО В ДВОРІ[^\\n]*|ХРОНІКА ДВОРУ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -578,7 +602,7 @@ export const tidy = (text) =>
       .replace(SERVICE_LINE, ""),
   )
     // Letters of other scripts ("дешевимกาแฟ" — Thai for coffee, 24.09.2026) are dropped; only Cyrillic and Latin stay.
-    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(STUTTER, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
+    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/\\?\*+/g, "").replace(STUTTER, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n"); // …and markdown stars ("\\*\\*\\*", 26.09.2026)
 
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
@@ -713,8 +737,15 @@ if (import.meta.main) {
     ["ді джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["з діджеєм на весіллі", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["диджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["DJ", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"],
     ["Бред Піт", "справжній мущина"], ["Бреда Піта", "справжній мущина"], ["Бред Пит", "справжній мущина"], ["Бредд Питт", "справжній мущина"],
     ["Бред питт", "справжній мущина"], ["Брэд Питт", "справжній мущина"], ["бредпіт", "справжній мущина"], ["Brad Pitt", "справжній мущина"], ["а шо там Бредом Пітом у кіно?", "справжній мущина"], ["Трамп", "шизік"], ["трумп", "шизік"], ["рудий", "шизік"], ["рыжий", "шизік"]])
-    assert.equal(fixedReply(`@babtsya_z_altanky_bot ${t}`), a, t);
-  for (const t of ["зелений чай", "зерно", "ющик", "молоко", "мольберт", "трамвай", "шо по гороскопах?", "порох у пороховниці", "моль у шафі все поїла", "пороховий склад", "бред якийсь", "Піт з п'ятого поверху", "Олена Федорівна з третього", "дядько Федір", "джем з полуниці", "Джейн"]) assert.equal(fixedReply(`@babtsya_z_altanky_bot ${t}`), null, t);
+    assert.equal(fixedFor(`@babtsya_z_altanky_bot ${t}`)?.text, a, t);
+  assert.equal(fixedIsBare("@babtsya_z_altanky_bot трамп"), true);
+  assert.equal(fixedIsBare("@babtsya_z_altanky_bot Трампа!"), true);
+  assert.equal(fixedIsBare("@babtsya_z_altanky_bot Бред Піт"), true);
+  assert.equal(fixedIsBare("@babtsya_z_altanky_bot шо там трамп?"), false);
+  assert.equal(fixedIsBare("@babtsya_z_altanky_bot порох"), true);
+  assert.equal(fixedFor("@babtsya_z_altanky_bot а шо там порошенко казав?").always, true);
+  assert.ok(fixedFor("@babtsya_z_altanky_bot шо там зеля?").angles.includes("Єрмаком"));
+  for (const t of ["зелений чай", "зерно", "ющик", "молоко", "мольберт", "трамвай", "шо по гороскопах?", "порох у пороховниці", "моль у шафі все поїла", "пороховий склад", "бред якийсь", "Піт з п'ятого поверху", "Олена Федорівна з третього", "дядько Федір", "джем з полуниці", "Джейн"]) assert.equal(fixedFor(`@babtsya_z_altanky_bot ${t}`), null, t);
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 13)?.key, "обід");
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 16), null);
   assert.equal(topicFor("@babtsya_z_altanky_bot і ще шоб про хахалєй сваїх розказувала", 18)?.key, "хахалі");
@@ -789,6 +820,7 @@ if (import.meta.main) {
   assert.deepEqual(copiedLines(copyPlay, chatNews), ["Ivan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!"]);
   assert.equal(applyFixes("Ivan M: було так", "було так => якщо так, то (сердито) інакше", { maxOld: 400, maxNew: 400, hedging: null }).text, "Ivan M: якщо так, то (сердито) інакше");
   assert.equal(tidy("РОЗМОВА ПЕРЕД ЦИМ:\nНу"), "Ну");
+  assert.equal(tidy("як тонометр \\*\\*\\* , а **жирно**"), "як тонометр , а жирно");
   assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
   assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
   assert.deepEqual(parseVote("Варіант 3, оцінка 5", 3), { best: 2, score: 5 });
@@ -796,6 +828,9 @@ if (import.meta.main) {
   assert.deepEqual(parseVote("", 3), { best: 0, score: 10 });
   assert.equal(playTitle("Бабця з альтанки представляє\n\n«Безсоння біля АТБ»\nП'єса на одну дію"), "«Безсоння біля АТБ»");
   assert.equal(playTitle("без назви"), "");
+  assert.equal(recentMemory([{ day: "2026-09-25", kind: "evening", plan: "ТЕМИ\n1. Тралік і тролейбус\n   Тип: ДВІР\n   Чим закінчилось: помирились.\nЩО РОБИВ\nTaras: мовчав" },
+    { day: "2026-09-25", kind: "midday", plan: "без тем" }]), "25.09 ввечері:\n1. Тралік і тролейбус\n  → помирились.");
+  assert.equal(tidy("ХРОНІКА ДВОРУ:\nЩО БУЛО В ДВОРІ ОСТАННІМИ ДНЯМИ:\nНу"), "Ну");
   assert.equal(committeeScore(["7", "8.", "Score: 9"]), 8);
   assert.equal(committeeScore(["3", "не знаю", "10"]), 6.5);
   assert.equal(committeeScore(["", "0", "11"]), null);

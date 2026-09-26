@@ -44,6 +44,22 @@ CREATE TABLE IF NOT EXISTS usage (
   replies INTEGER NOT NULL
 );
 
+-- B: the yard's chronicle — running stories, memes, local words — rebuilt weekly from the week's plans on top of the
+-- previous one, so after a month she knows the chat. One row per rebuild; the newest is used.
+CREATE TABLE IF NOT EXISTS chronicle (
+  week TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  created INTEGER NOT NULL
+);
+
+-- C (prepared, off): one line per member — what they're known for in the yard. Written only when PEOPLE_NOTES = "1",
+-- read nowhere yet: whether profiles of neighbours are used is the owner's call (26.09.2026).
+CREATE TABLE IF NOT EXISTS people_notes (
+  name TEXT PRIMARY KEY,
+  notes TEXT NOT NULL,
+  updated INTEGER NOT NULL
+);
+
 -- Name → Telegram user id, refreshed from every message: a real tag (text_mention) needs the id. Kept across digests.
 CREATE TABLE IF NOT EXISTS people (
   name TEXT PRIMARY KEY,
