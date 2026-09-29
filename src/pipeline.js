@@ -41,7 +41,7 @@ const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
 const redact = (t) => REDACTIONS.reduce((s, [re, ph]) => s.replace(re, ph), t);
 // "@nick" in the digest would ping that person; the bare nick keeps the meaning without a notification.
 const MENTION = /(^|[^\w.@])@([A-Za-z][\w]{3,31})/g;
-export const unmention = (t) => t.replace(MENTION, "$1$2");
+const unmention = (t) => t.replace(MENTION, "$1$2");
 // "Iron Grey Owl, esquire" is one person, but a comma in a name splits every list (roll call, say&tag=…):
 // the part before the first comma is the name everywhere (user, 25.09.2026).
 export const displayName = (n) => n.split(",")[0].trim() || n;
@@ -226,13 +226,10 @@ export const stripHints = (text, image = "") =>
 
 // The answer is a reply, so naming the author is noise ("Ivan M, ще при Кучмі…", 24.09.2026). Full name, the part
 // before a comma ("Iron Grey Owl") and the first word are cut wherever they stand, then punctuation is mended.
-// The name she calls the addressee by (user, 29.09.2026: "answer by name if there's a link"): the first nickname from
-// ALIASES, and only if nobody else has it — "Костя" yes, "Саша" (three of them) or "Оля" (two) no name at all.
-export function callName(aliases, name) {
-  const first = aliases.get(name)?.[0];
-  if (!first) return "";
-  return [...aliases].some(([n, forms]) => n !== name && forms.includes(first)) ? "" : first;
-}
+// The name she calls the addressee by (user, 29.09.2026: "answer by name if there's a link"): the first form in ALIASES,
+// written as the exact address ("Максиме", "Олю") — the model made "Алексею" of "Алекс". A shared form is fine here:
+// the reply goes to one person anyway (user, 30.09.2026: both Nina are "Олю", both Oleksandrs "Сашко").
+export const callName = (aliases, name) => aliases.get(name)?.[0] ?? "";
 
 export function dropName(text, name) {
   const forms = [...new Set([name, name.split(",")[0], name.split(" ")[0]].map((f) => f.trim()).filter((f) => f.length >= 3))];
@@ -263,7 +260,7 @@ export const genderLine = (names, set) => {
 const W = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})`, "iu");
 // Every topic answers the question first: "розклади таро, чи виграє збірна України" got three stock cards about
 // the building, not a word about the team (25.09.2026). Hints carry no concrete examples — the model copies them.
-export const REPLY_TOPICS = [
+const REPLY_TOPICS = [
   // "дай рецепт оладків на молоці" got a joke about an old TV (25.09.2026): a request gets the real thing, in her voice.
   { key: "рецепт", long: true, re: W("рецепт|як приготув|як зварит|що приготув|шо приготув|що зварит|шо зварит|что приготов|что свари|як спект|як засол|як посол|як зробит|как пригот|как свар|как испеч|как засол|как сдела"),
     hint: "Тема — рецепт: дай СПРАВЖНІЙ робочий рецепт того, що просять: інгредієнти з кількістю й 3–6 коротких кроків, рядками. По-бабциному — з бурчанням на початку й одним жартом наприкінці, але рецепт має бути правильний. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
@@ -324,7 +321,7 @@ export const REPLY_TOPICS = [
 // wherever the name stands in the message. "порох" and "моль" are ordinary words too (gunpowder, moth), so they count
 // only when the message is that one word.
 const WE = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})(?![\\p{L}])`, "iu"); // whole words, for short or ambiguous stems
-export const FIXED_REPLIES = [
+const FIXED_REPLIES = [
   // angles: what she goes on about when the tag has more than the name — directions, not lines to copy (user, 26.09.2026).
   { re: W("зеленськ|зеленск|зелю|зєл[юяі]|zelensk"), alt: WE("зеля|зелі|зелька|зелик|зе"), text: "заїбав вже",
     angles: "знову не бачив, як навколо крадуть; знову кудись полетів; знову відмазує друзів; грає в теніс з Єрмаком" },
@@ -586,6 +583,8 @@ export function committeeScore(answers) {
 export const playTitle = (play) => play.match(/^«[^\n]+»$/m)?.[0] ?? "";
 
 // Code-made remarks (roll call, poll verdict) go right before the moral.
+// "(Мораль: …)" in brackets hid the moral from beforeMoral and rollCall — the roll call went after it (30.09.2026).
+export const plainMoral = (play) => play.replace(/^\(\s*Мораль\s*:\s*(.+?)\)\s*$/gm, "Мораль: $1");
 export function beforeMoral(play, line) {
   const moral = play.lastIndexOf("\nМораль");
   return moral < 0 ? `${play.trimEnd()}\n\n${line}` : `${play.slice(0, moral).trimEnd()}\n\n${line}\n${play.slice(moral)}`;
@@ -594,12 +593,22 @@ export function beforeMoral(play, line) {
 // Replicas the writer copied from the chat instead of writing (25.09.2026: news retold word for word): 6 words in a
 // row shared with any chat message. The last replica of a scene may stay verbatim — it's the punchline.
 const plainWords = (s) => s.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-export function copiedLines(play, chat, n = 6) {
-  const seen = new Set();
+// Every run of n words in the chat → who wrote it (copiedLines and misattributed read the same map).
+function chatRuns(chat, n) {
+  const runs = new Map();
   for (const m of chat) {
-    const w = plainWords(m.replace(/^\[\d\d:\d\d\] [^:\n]+: (?:\(відповідь [^)]*\) )?/, ""));
-    for (let i = 0; i + n <= w.length; i++) seen.add(w.slice(i, i + n).join(" "));
+    const [, who, text] = m.match(/^\[\d\d:\d\d\] ([^:\n]+): (?:\(відповідь [^)]*\) )?(.*)/) ?? [];
+    if (!who) continue;
+    const w = plainWords(text);
+    for (let i = 0; i + n <= w.length; i++) {
+      const k = w.slice(i, i + n).join(" ");
+      runs.set(k, (runs.get(k) ?? new Set()).add(who));
+    }
   }
+  return runs;
+}
+export function copiedLines(play, chat, n = 6) {
+  const seen = chatRuns(chat, n);
   const lines = play.split("\n");
   return lines.filter((l, i) => {
     const said = l.match(/^([^\n:]{1,80}): (.+)/)?.[2];
@@ -609,6 +618,27 @@ export function copiedLines(play, chat, n = 6) {
     const w = plainWords(said);
     for (let k = 0; k + n <= w.length; k++) if (seen.has(w.slice(k, k + n).join(" "))) return true;
     return false;
+  });
+}
+
+// Words put in the wrong mouth (29.09.2026: Lida got "Волохаті люди красиві і воняють коли давно не миті" — the second
+// half was Artem's). A replica whose speaker shares a run of n words with someone else's chat message and with none of
+// their own. Speaker names are matched by their start ("Iron Grey Owl" for "Iron Grey Owl, esquire").
+export function misattributed(play, chat, n = 5) {
+  const runs = chatRuns(chat, n);
+  return play.split("\n").filter((l) => {
+    const [, speaker, said] = l.match(/^([^\n:(]{1,80}?)\s*(?:\([^)\n]*\))?: (.+)/) ?? [];
+    if (!said || /^(Мораль|Дійові|Дія)/.test(speaker)) return false;
+    const mine = (who) => who.startsWith(speaker.trim()) || speaker.trim().startsWith(who.split(",")[0]);
+    const w = plainWords(said);
+    let others = false;
+    for (let k = 0; k + n <= w.length; k++) {
+      const authors = runs.get(w.slice(k, k + n).join(" "));
+      if (!authors) continue;
+      if ([...authors].some(mine)) return false;
+      others = true;
+    }
+    return others;
   });
 }
 
@@ -642,15 +672,21 @@ const fixMixed = (t) => t.replace(/\p{L}+/gu, (w) => {
 // A stuttered function word ("наче той кіт, що, що у шматочок", 25.09.2026) — the model's glitch, never style.
 // ponytail: only short function words; an emphatic "так, так" or "ну-ну" stays.
 const STUTTER = /(?<![\p{L}])(що|як|і|й|в|у|на|з|до|та|не|це|бо|же)(?:,?\s+\1)+(?![\p{L}])/giu;
+// "сука" became a tic at every reply's end (user, 29.09.2026: "прибери це слово"): cut with its commas; a sentence it
+// opened gets its capital back. Other swearing stays — it's her style.
+const noSuka = (t) => t.replace(/,\s*сук[аоу](?![\p{L}])/giu, "")
+  .replace(/(^|[.!?…]\s+)сук[аоу](?![\p{L}])[,!]?\s*(\p{L})?/gimu, (m, start, next = "") => start + next.toUpperCase())
+  .replace(/\s*(?<![\p{L}])сук[аоу](?![\p{L}])/giu, "");
 export const tidy = (text) =>
-  SERVICE_INLINE.reduce(
+  noSuka(SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
     fixMixed(unmention(text)).replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
       .replace(/«<([^<>»\n]*)>»/g, "«$1»") // the template's «<назва>» copied verbatim (24.09.2026)
       .replace(SERVICE_LINE, ""),
   )
     // Letters of other scripts ("дешевимกาแฟ" — Thai for coffee, 24.09.2026) are dropped; only Cyrillic and Latin stay.
-    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/\\?\*+/g, "").replace(STUTTER, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n"); // …and markdown stars ("\\*\\*\\*", 26.09.2026)
+    .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/\\?\*+/g, "").replace(STUTTER, "$1") // …and markdown stars ("\\*\\*\\*", 26.09.2026)
+  ).replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
 
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
@@ -669,7 +705,7 @@ export function finalize(play) {
   play = tidy(play).replace(/([^\n])\n(\(Сцена)/g, "$1\n\n$2");
   if (!play.trimStart().startsWith(`${BOT_NAME} представляє`)) play = `${BOT_NAME} представляє\n\n${play.trimStart()}`;
   if (play.length > HARD_LIMIT) {
-    // ponytail: last-resort cut at a paragraph break drops the ending; fires only if "shorten" also failed.
+    // ponytail: last-resort cut at a paragraph break drops the ending; fires only if the fit-to-length pass also failed.
     const cut = play.lastIndexOf("\n\n", HARD_LIMIT);
     play = cut > 0 ? play.slice(0, cut) : play.slice(0, HARD_LIMIT);
   }
@@ -876,9 +912,16 @@ if (import.meta.main) {
   assert.equal(tidy("як тонометр \\*\\*\\* , а **жирно**"), "як тонометр , а жирно");
   assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
   assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
+  assert.equal(plainMoral("Ivan M: Так.\n\n(Мораль: Якщо нема доказів — вибери табуретку.)"), "Ivan M: Так.\n\nМораль: Якщо нема доказів — вибери табуретку.");
+  const hairChat = ["[21:10] Lida: Волохаті люди красиві", "[21:11] Taras: вони ж воняють коли давно не миті, це некрасиво"];
+  const hairPlay = "Taras (з презирством): Вони ж воняють, коли давно не миті!\nLida: Волохаті люди красиві і воняють коли давно не миті!\nLida: Волохаті люди красиві, крапка.";
+  assert.deepEqual(misattributed(hairPlay, hairChat), ["Lida: Волохаті люди красиві і воняють коли давно не миті!"]);
+  assert.equal(tidy("Кальвадос — це маска, за якою ховається морда, сука!"), "Кальвадос — це маска, за якою ховається морда!");
+  assert.equal(tidy("Сука, ти шо, Костю? Ну, сука, дає."), "Ти шо, Костю? Ну, дає.");
+  assert.equal(tidy("Біля суки й сучасного ринку."), "Біля суки й сучасного ринку."); // other words untouched
   const nicks = new Map([["Bohdan", ["Костя", "Костик"]], ["Ivan M", ["Саша"]], ["Mykola.Pr", ["Саша"]]]);
   assert.equal(callName(nicks, "Bohdan"), "Костя");
-  assert.equal(callName(nicks, "Ivan M"), ""); // "Саша" is two people
+  assert.equal(callName(nicks, "Ivan M"), "Саша"); // shared is fine: the reply goes to one person
   assert.equal(callName(nicks, "Taras"), "");
   const nick = new Map([["✙Taras Test✙", ["Максим", "Макс"]], ["Nora Frog", ["Оля"]], ["Zina D", ["Оля"]]]);
   assert.equal(aliasSpeakers("Дійові особи:\nМаксим\nОля — сперечається\n\nМаксим (позіхаючи): Та які там календарі.\nОля: Ні.",

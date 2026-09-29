@@ -6,7 +6,7 @@ import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
 import grumblePrompt from "../prompts/grumble.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, leadFixed, aliasSpeakers, callName, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -29,9 +29,8 @@ const REPLY_DRAFTS = 3;
 const REPLY_FULL_MAX = 40; // 25 → 40 (user, 25.09.2026): 40 × ~170 + plays, posters, grumbles ≈ 8.5k of 10k
 const REPLY_GOOD = 7; // judge score 1–10
 // waitUntil lives ~30 s after the webhook answer (25.09.2026: two tags got no reply, the chain runs 10–20 s):
-// a second round only if the first took < 10 s, the corrector only if < 22 s have passed, model retries after 2 s.
+// a second round only if the first took < 10 s, model retries after 2 s; each step's wall is REPLY_WALLS below.
 const REPLY_BUDGET_MS = 10000;
-const REPLY_DEADLINE_MS = 22000;
 const REPLY_PAUSE_MS = 2000;
 // 29.09.2026: "друкує…" then silence — the chain ran past waitUntil's ~30 s and died unsent. Hard walls per step
 // (ms from start): brief, drafts, judge, corrector; a step that's late gives up and the reply goes with what there is.
@@ -94,24 +93,12 @@ export default {
         const missing = names.filter((n) => !people.some((p) => p.name === n));
         return new Response(`say: ${prefix.text}${text}${missing.length ? `\nбез тегу (ще не писали після оновлення): ${missing.join(", ")}` : ""}`);
       }
-      // ?kind=sample&text=…[&name=…][&t=0.6,0.8,1.0][&n=2] — replies at each temperature, returned here, never sent.
-      if (kind === "sample") {
-        const text = url.searchParams.get("text") || "", name = url.searchParams.get("name") || "Ivan M";
-        const temps = (url.searchParams.get("t") || "0.6,0.8,1.0").split(",").map(Number).filter((t) => t >= 0 && t <= 2).slice(0, 4);
-        const n = Math.min(Number(url.searchParams.get("n")) || 2, 3);
-        const out = [];
-        for (const t of temps) for (let i = 0; i < n; i++) {
-          const r = await compose(env, name, text, "", t);
-          out.push(`t=${t} (${r.tone}, оцінка ${r.score ?? "—"}): ${r.text || "—"}${r.brief ? `\n   розбір: ${r.brief.replace(/\n+/g, " | ")}` : ""}`);
-        }
-        return new Response(out.join("\n"));
-      }
       // ?kind=poll[&to=group] — one poll now, same as the 21:00 one.
       if (kind === "poll") return new Response(await poll(env, toGroup));
       // ?kind=gif[&to=me] — one GIF from the stock now (to=me: your private chat).
       if (kind === "gif") return new Response(await gif(env, url.searchParams.get("to") === "me" ? env.TEST_CHAT_ID : target(env, toGroup)));
-      // ?kind=chronicle[&all=1] — rebuild the yard's chronicle now and see it here (no chat); all=1 learns from the whole history.
-      if (kind === "chronicle") return new Response(await chronicle(env, url.searchParams.get("all") === "1").catch((e) => `chronicle: помилка — ${e.message}`));
+      // ?kind=chronicle — rebuild the week's chronicle now and see it here (no chat).
+      if (kind === "chronicle") return new Response(await chronicle(env).catch((e) => `chronicle: помилка — ${e.message}`));
       // ?kind=stock — one more scored meat picture into the stock (D1 only, no chat).
       if (kind === "stock") return new Response(`${await stockMeat(env)} [${lastDraw}]`);
       // ?kind=poster[&title=«…»][&to=me] and ?kind=tease[&to=me] — one picture now; to=me goes to your private chat.
@@ -253,7 +240,9 @@ async function digest(env, day, kind, keep = false, chat = target(env)) {
   // A poster before both scheduled plays (user, 25.09.2026); a manual preview stays text only.
   if ((kind === "evening" || kind === "midday") && title) console.log(await poster(env, chat, title, kind, (play.text.match(/^\(Сцена [^\n]*$/gm) ?? []).slice(0, 4).join("\n")).catch((e) => `poster: ${e.message}`));
   await telegram(env, "sendMessage", { chat_id: chat, text: prefix + play.text });
-  if (keep) return `${kind}: ${rows.length} повідомлень → ${play.text.length} символів (попередній перегляд, база не чіпалась)`;
+  // A preview reports what a reader would miss: scenes, moral, verdict, roll call, room left (30.09.2026).
+  const t = play.text, has = (re) => (re.test(t) ? "так" : "НІ");
+  if (keep) return `${kind}: ${rows.length} повідомлень → ${t.length} символів з ${HARD_LIMIT} (запас ${HARD_LIMIT - t.length}); сцен ${(t.match(/^\(Сцена \d+/gm) ?? []).length}; мораль ${has(/^Мораль/m)}; перекличка ${has(/Також у дворі/)}; вердикт ${has(/зрад|перемог/i)} (попередній перегляд, база не чіпалась)`;
   // Only messages that went into this digest are deleted; ones that arrived meanwhile wait for the next.
   await env.DB.batch([
     env.DB.prepare("INSERT OR REPLACE INTO digests (day, kind, plan, created) VALUES (?, ?, ?, ?)").bind(day, kind, play.plan, runStart),
@@ -281,7 +270,7 @@ async function grumble(env, now, forced, toGroup = false) {
 
 const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2: funniest, still coherent
 
-// One reply, not sent: used by the live answer and by /run?kind=sample for comparing temperatures.
+// One reply, not sent: the live answer sends what this returns.
 // other = the member the tagged message replies to ({ name, text, id }): "@бабця видай Олі пігулок" as a reply to
 // Nina is meant for Nina (25.09.2026) — the brief decides whom she answers.
 async function compose(env, name, raw, botText, temperature = REPLY_TEMP, context = "", other = null, draftsN = REPLY_DRAFTS, news = "") {
@@ -318,7 +307,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   const woman = isFemale(to, femaleSet(env.FEMALE_NAMES));
   const who = `${to === name ? "Автор" : `Відповідай не автору, а ${to} — звертайся до ${woman ? "неї" : "нього"}. Адресат`} — ${woman ? "жінка: жіночий рід, «доню»" : "чоловік: чоловічий рід, «синку»"}.`;
   const call = callName(parseAliases(env.ALIASES), to);
-  const byName = call ? ` Звертайся до ${woman ? "неї" : "нього"} на ім'я в житті «${call}» (у кличному відмінку, раз), а не «${woman ? "доню" : "синку"}».` : "";
+  const byName = call ? ` Звертайся до ${woman ? "неї" : "нього"} дослівно «${call}» — саме в цій формі, не відмінюй і не міняй (раз), а не «${woman ? "доню" : "синку"}».` : "";
   const long = topic?.long; // a recipe needs room
   // 2. Same tone for all drafts (the rude/wise ratio holds), a different move each — that's the variety.
   // No random image any more (29.09.2026): "Порівняння бери з теми «каша / посилка / квитанція»" pulled a comparison
@@ -345,8 +334,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   console.log(`Відповідь ${name}: розбір ${brief ? "є" : "—"}, оцінка ${first}${pool.length > REPLY_DRAFTS ? ` → другий раунд ${score}` : ""}, ${Date.now() - start} мс`);
   let text = pool[best];
   // Same corrector as the plays: replies went straight out and "той розписка" got caught by the group (24.09.2026).
-  if (Date.now() - start < REPLY_DEADLINE_MS)
-    text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, gender + text, 0.2, 300, REPLY_PAUSE_MS, start + REPLY_WALLS.polish)), { protectedTerms: [name, BOT_NAME] }).text;
+  text = applyFixes(text, dedupLoop(await ai(env, polishPrompt, gender + text, 0.2, 300, REPLY_PAUSE_MS, start + REPLY_WALLS.polish)), { protectedTerms: [name, BOT_NAME] }).text;
   if (fixed) text = leadFixed(text, fixed); // the phrase always leads, once
   text = fixNames(text, [name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean));
   return { tone: topic?.key || tone, text: dropName(text, to).slice(0, long ? 1500 : 500), brief, score, to };
@@ -457,6 +445,15 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     play = r.text;
     console.log(`Переказ: скопійовано ${copied.length}, переписано ${r.applied.length}, відхилено ${r.rejected.length}`);
   }
+  // Someone else's words in a member's mouth: rewritten to what the speaker could say; left → the replica goes.
+  const wrong = misattributed(play, writerLines);
+  if (wrong.length) {
+    const fix = await ai(env, "У цих репліках п'єси героєві приписано чужі слова з чату — те, що насправді сказав інший сусід. Перепиши кожну так, щоб герой казав лише своє: його позицію чи реакцію на чужі слова своїми словами, без чужих фраз. Стиль Подерв'янського, ім'я героя на початку не чіпай. Для КОЖНОЇ репліки виведи рядок «стара репліка => нова репліка». Нічого більше.", wrong.join("\n"), 0.7, 600);
+    play = applyFixes(play, dedupLoop(fix), { maxOld: 400, maxNew: 450, protectedTerms, hedging: null }).text;
+    const left = misattributed(play, writerLines);
+    for (const l of left) play = play.replace(`${l}\n`, "").replace(l, "");
+    console.log(`Чужі слова: ${wrong.length}, лишилось і прибрано ${left.length}`, wrong);
+  }
   for (const [pass, prompt, tokens] of [["Коректор", polishPrompt, 900], ["Узгодження", polishPrompt + AGREE_PASS, 600]]) {
     const polished = applyFixes(play, dedupLoop(await ai(env, prompt, (header.match(/^СТАТЬ:.*\n\n/)?.[0] ?? "") + play, 0.2, tokens)), { protectedTerms });
     console.log(`${pass}: застосовано ${polished.applied.length}, відхилено ${polished.rejected.length}`, polished.rejected);
@@ -471,9 +468,25 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     console.log(`Війна: ${war.join(", ")}; застосовано ${fixed.applied.length}, відхилено ${fixed.rejected.length}; лишилось: ${warWords(play, writerChat).join(", ") || "—"}`, fix.slice(0, 500));
   }
   const senders = protectedTerms.filter((t) => t !== BOT_NAME && lines.some((l) => l.includes(`] ${t}: `)));
-  play = fixNames(aliasSpeakers(play, parseAliases(env.ALIASES), senders), senders);
-  const staged = rollCall(castShuffle(castClean(castFix(play, senders), tags, senders)), senders);
-  return { text: finalize(stageHead(remark ? beforeMoral(staged, remark) : staged, image, night.match(/«(.+)»\.$/)?.[1])), plan };
+  // The finished play is measured with everything code adds (tags, roll call, poll verdict, stage head): 29.09.2026 the
+  // evening one overflowed after "shorten" and finalize's tail cut ate the verdict and the moral. Too long → the model
+  // shortens by exactly the excess, all scenes and their sense kept (user: "без обрізання сцен і смислу").
+  const assemble = (p) => {
+    p = plainMoral(fixNames(aliasSpeakers(p, parseAliases(env.ALIASES), senders), senders));
+    const staged = rollCall(castShuffle(castClean(castFix(p, senders), tags, senders)), senders);
+    return stageHead(remark ? beforeMoral(staged, remark) : staged, image, night.match(/«(.+)»\.$/)?.[1]);
+  };
+  const room = HARD_LIMIT - `${BOT_NAME} представляє\n\n`.length;
+  let full = assemble(play);
+  for (let i = 0; i < 2 && full.length > room; i++) {
+    const target = play.length - (full.length - room) - 200;
+    const short = await ai(env, `Скороти п'єсу до ${target} символів. Усі сцени лишаються — їхня кількість, порядок, хто говорить і сенс. Стискай довгі репліки й ремарки, прибирай повтори й зайві слова. Розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
+    if (!(short.length > 500 && short.length < play.length && (short.match(/\(Сцена/g) ?? []).length >= (play.match(/\(Сцена/g) ?? []).length)) break;
+    console.log(`Довжина: ${full.length} > ${room}, скорочено п'єсу ${play.length} → ${short.length}`);
+    play = short;
+    full = assemble(play);
+  }
+  return { text: finalize(full), plan };
 }
 
 // One retry on an empty answer or an error (rate limit, "finish_reason: length"), per requirements.
@@ -530,14 +543,14 @@ async function memory(env) {
 // B: every Monday the week's plans are folded into the previous chronicle — stories that run between days, memes,
 // local words, nicknames. Cumulative, so after a month she knows the chat. No health, family or private life.
 const CHRONICLE = "Ти — літописиця двору. Тобі дають попередню хроніку двору й плани випусків за тиждень. Онови хроніку: до 15 коротких пунктів, кожен рядок починається з «- ». Лише життя двору: історії, що тягнуться між днями, повторювані жарти й меми, місцеві слова й прізвиська, спільні справи сусідів. Нове додай, застаріле й разове прибери. НЕ пиши: новини, політику, війну, обстріли, зброю, фронт; адреси й телефони; оцінки людей; як влаштований сам бот чи коли він що публікує. Без заголовків, без зірочок і жирного — лише рядки «- …».";
-// C (off unless PEOPLE_NOTES = "1"): what each member is known for. Stored, read nowhere yet.
+// C (PEOPLE_NOTES = "1"): what each member is known for, updated every Monday; read by the reply brief.
 const NOTES = "Тобі дають попередні нотатки про учасників сусідського чату й нові плани випусків. Онови нотатки: для кожного учасника, що є в нотатках чи в планах, — один рядок «Ім'я: …» — чим він відомий у дворі: теми, захоплення, повторювані жарти, улюблені слівця. Нове додай, застаріле прибери, старе, що й далі правда, лиши. Без здоров'я, родини, адрес, роботи, грошей, оцінок і особистого життя. Лише рядки «Ім'я: …», нічого більше.";
-// all = true: the whole stored history, chunk by chunk, each folded into the chronicle (and notes) so far — the
-// "learning run" over the chat's database (29.09.2026). Plans are all there is: raw messages go after each play.
-async function chronicle(env, all = false) {
+// A long week goes chunk by chunk, each folded into the chronicle (and notes) so far. The whole chat's history was
+// learnt once from the export instead (row week = 'історія', 29.09.2026).
+async function chronicle(env) {
   const now = Math.floor(Date.now() / 1000);
-  const { results } = await env.DB.prepare(`SELECT day, kind, plan FROM digests WHERE plan IS NOT NULL${all ? "" : " AND created >= ?"} ORDER BY created`)
-    .bind(...(all ? [] : [now - 7 * 86400])).all();
+  const { results } = await env.DB.prepare("SELECT day, kind, plan FROM digests WHERE plan IS NOT NULL AND created >= ? ORDER BY created")
+    .bind(now - 7 * 86400).all();
   if (!results.length) return "chronicle: нема планів";
   const chunks = packChunks(results.map((r) => `${r.day} ${r.kind}:\n${r.plan}`));
   let text = (await env.DB.prepare("SELECT text FROM chronicle WHERE week != 'історія' ORDER BY created DESC LIMIT 1").first("text")) || "";
