@@ -33,7 +33,7 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже", кабачке: "кабачку", "в зенит": "в зеніті" };
 // "Бабця, ти сьогодні…" — addressing her needs the vocative (25.09.2026). Only at the start of a line or a reply,
 // so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
 const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
@@ -125,6 +125,14 @@ export const teaseMinute = (day) => {
   const d = Date.parse(day) / 864e5;
   return d % 2 === 1 ? TEASE_TICKS[d % TEASE_TICKS.length] : null;
 };
+// A GIF from the owner's stock every second day (even day numbers — the tease has the odd ones), at a half-hour
+// 10:00–19:30 off the grumble ticks and the 13:00–15:00 quiet (user, 29.09.2026).
+const GIF_TICKS = Array.from({ length: 20 }, (_, i) => 600 + i * 30)
+  .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
+export const gifMinute = (day) => {
+  const d = Date.parse(day) / 864e5;
+  return d % 2 === 0 ? GIF_TICKS[(d / 2) % GIF_TICKS.length] : null;
+};
 export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e5) * 7) % NEIGHBOUR_TICKS.length];
 
 export const parseGrumbles = (txt) => {
@@ -196,7 +204,7 @@ export const REPLY_MOVES = {
 // "В неї троха фетиш на голубів" (24.09.2026): every reply and every play opened with pigeons, ЖЕК and маршрутка,
 // the prompts' own examples. Code now picks the image, one per reply and one per play.
 export const IMAGES = [
-  "черга в поліклініку", "пенсійний фонд", "базар на Виноградарі", "тролейбус без світла", "ремонт у сусіда зверху",
+  "черга в поліклініку", "пенсійний фонд", "базар на Виноградарі", "тролейбус без світла", 
   "Нова пошта й загублена посилка", "турецький серіал о сьомій", "акція в АТБ на ковбасу",
   "дача й колорадські жуки", "ліфт, що застряг між поверхами", "лічильник за воду", "сусідський кіт", "лавка біля під'їзду",
   "батареї, які не гріють", "шлюб у РАЦСі в дев'яностих", "тиск і тонометр", "бабусин сервант із кришталем",
@@ -218,6 +226,14 @@ export const stripHints = (text, image = "") =>
 
 // The answer is a reply, so naming the author is noise ("Ivan M, ще при Кучмі…", 24.09.2026). Full name, the part
 // before a comma ("Iron Grey Owl") and the first word are cut wherever they stand, then punctuation is mended.
+// The name she calls the addressee by (user, 29.09.2026: "answer by name if there's a link"): the first nickname from
+// ALIASES, and only if nobody else has it — "Костя" yes, "Саша" (three of them) or "Оля" (two) no name at all.
+export function callName(aliases, name) {
+  const first = aliases.get(name)?.[0];
+  if (!first) return "";
+  return [...aliases].some(([n, forms]) => n !== name && forms.includes(first)) ? "" : first;
+}
+
 export function dropName(text, name) {
   const forms = [...new Set([name, name.split(",")[0], name.split(" ")[0]].map((f) => f.trim()).filter((f) => f.length >= 3))];
   for (const f of forms.sort((a, b) => b.length - a.length)) {
@@ -312,13 +328,15 @@ export const FIXED_REPLIES = [
   // angles: what she goes on about when the tag has more than the name — directions, not lines to copy (user, 26.09.2026).
   { re: W("зеленськ|зеленск|зелю|зєл[юяі]|zelensk"), alt: WE("зеля|зелі|зелька|зелик|зе"), text: "заїбав вже",
     angles: "знову не бачив, як навколо крадуть; знову кудись полетів; знову відмазує друзів; грає в теніс з Єрмаком" },
-  { re: W("порошенк|poroshenk"), only: ["порох"], text: "найкращій президент", always: true }, // always word for word
+  // Any form, anywhere in the message ("Порох топчик… @бабця нє?" got the general answer, 29.09.2026); always word for word.
+  // "порох" is gunpowder too: the idiom "порох у порохівницях" stays out.
+  { re: W("порошенк|poroshenk|петр[оау] олексійович"), alt: /(?<![\p{L}])(?:порох|пороха|пороху|порохом|порохові)(?![\p{L}])(?!\s+[ув]\s+порох)/iu, text: "найкращій президент", always: true },
   { re: W("ющенк|yushchenk"), alt: WE("ющ|юща|ющу|ющем|ющеві"), text: "так" },
   { re: W("путін|путин|путлер|пуйл|бункерн|putin"), alt: WE("ввп|хуйло"), only: ["моль"], text: "хуйло",
     angles: "знову несе хуйню; знову погрожує всьому світу; сидить у бункері й боїться власної тіні" },
   { re: W("трамп|трумп|trump|рудий|рудого|рудому|рижий|рыжий|рыжего"), text: "шизік",
     angles: "знову дуріє; бомбив Іран; тягне гроші звідусіль; вводить мита на все підряд" },
-  { re: W("д[іи][\\s-]?дже[йяюєї]"), alt: WE("dj"), text: "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!" },
+  { re: W("д[іи][\\s-]?дже[йяюєї]"), alt: WE("dj"), text: "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!" },
   // Whole surname forms only: "Федорівна" (patronymic) and "Федір" (first name) must not trigger.
   { re: WE("федоров|федорова|федорову|федоровим|федорові|федорів|федорових|fedorov"), text: "роль кібербезпеки трохи перебільшена" },
   { re: W("(?:бре+д+|брэ+д+|bra+d+)\\p{L}*[\\s-]*(?:пі+т+|пи+т+|пє+т+|pi+t+)"), text: "справжній мущина" },
@@ -359,6 +377,14 @@ const REPOST_MSG = /^\[\d\d:\d\d\] [^:]+: \[переслав /;
 export const withoutReposts = (lines) => lines.filter((l) => !REPOST_MSG.test(l));
 
 // Topic titles and endings of the previous digest, so the secretary recognises continuations.
+// Plans packed into ≤ max-char chunks, in order — the model reads a whole history one chunk at a time (29.09.2026).
+export const packChunks = (items, max = 40000) => items.reduce((acc, t) => {
+  const last = acc.at(-1);
+  if (last && last.length + t.length + 2 <= max) acc[acc.length - 1] = `${last}\n\n${t}`;
+  else acc.push(t.slice(0, max));
+  return acc;
+}, []);
+
 // A: the last digests' topics and endings for a tag reply, newest first, dated, capped (26.09.2026) — the plans are
 // already in D1 (digests.plan), nothing new is stored for this.
 export function recentMemory(rows, max = 1500) {
@@ -398,13 +424,13 @@ const editCast = (play, fn) => {
 export const castFix = (play, names) => editCast(play, (lines) => {
   const cast = new Set(lines.slice(1).map((l) => nameKey(castName(l))));
   const add = names.filter((n) => !cast.has(nameKey(n)) && new RegExp(`^${esc(n)}(?: \\([^)\\n]*\\))?:`, "m").test(play))
-    .map((n) => `${n} — голос із натовпу`);
+    .map((n) => n); // a bare name: "— голос із натовпу" read as a label (29.09.2026)
   const others = lines.findIndex((l) => l.startsWith("та інші"));
   return others < 0 ? [...lines, ...add] : [...lines.slice(0, others), ...add, ...lines.slice(others)];
 });
 
 // «Дійові особи» line = "Name «tag» — role in today's story": the tag is the member's real one, put there by code;
-// the model writes only the role. "Lida — сарделька, яка знає ціну репутації" hurt (24.09.2026): if the role
+// the model writes only the role. "Lida — ковбаска, яка знає ціну репутації" hurt (24.09.2026): if the role
 // still leans on the tag, it goes and "Name «tag»" stays. Matched by 5-letter stems of every tag word, since the
 // model inflects ("сардельку"); a tag without a 4+ letter word ("Нік2") is matched whole; "Тюлєчка, форшмак" is two
 // nicknames, any one counts. Title and scenes may play with tags — a joke.
@@ -430,7 +456,9 @@ export function castClean(play, tags, names = []) {
 
 // «Дійові особи» in a new order every time, "та інші мешканці двору" stays last (user, 25.09.2026).
 export const castShuffle = (play, rnd = Math.random) => editCast(play, ([head, ...body]) => {
-  const rest = body.filter((l) => l.startsWith("та інші")), cast = body.filter((l) => !l.startsWith("та інші"));
+  // The model once wrote "ta інші" in Latin letters and it got shuffled into the middle (29.09.2026).
+  const isRest = (l) => /^[tт][aа]\s+інші/iu.test(l);
+  const rest = body.filter(isRest).map((l) => l.replace(/^[tт][aа]/iu, "та")), cast = body.filter((l) => !isRest(l));
   for (let i = cast.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [cast[i], cast[j]] = [cast[j], cast[i]];
@@ -470,12 +498,23 @@ export function rollCall(play, names) {
 
 // The reply judge answers "2 8" — best draft and its score 1–10. Garbage picks the first draft and counts as
 // good, so a confused judge never costs a second round.
+// The fixed phrase leads exactly once (29.09.2026: the model wrote it itself with "—" for "-", the exact-prefix check
+// missed it and the phrase went out twice, "Коваленкий!. В світі існує…"). Any copy, whatever the dashes and
+// punctuation, is cut out; the phrase goes first, with no "." after its own "!".
+export function leadFixed(text, fixed) {
+  const words = fixed.match(/\p{L}+/gu) ?? [];
+  const copy = new RegExp(`${words.join("[^\\p{L}]+")}[^\\p{L}\\s]*`, "giu");
+  const rest = text.replace(copy, "").replace(/^[\s.,!?:;—–-]+/u, "").trim();
+  const head = `${fixed[0].toUpperCase()}${fixed.slice(1)}${/[.!?…]$/.test(fixed) ? "" : "."}`;
+  return rest ? `${head} ${rest}` : head;
+}
+
 export function parseVote(text, n) {
   const [k, score] = (text.match(/\d+/g) ?? []).map(Number);
   return { best: k >= 1 && k <= n ? k - 1 : 0, score: score ?? 10 };
 }
 
-// The model garbles real names: "Ніркослав Нифонов" for "Николай Нифонов" (25.09.2026) — then the roll call
+// The model garbles real names: "Ніркослав Коваль" for "Николай Коваль" (25.09.2026) — then the roll call
 // also missed him. Every member's name gets its exact spelling back, in plays and replies:
 // - two-word names: one word exact, the neighbour a garbled other word (same first letter, similar length) → full name;
 // - one-word Latin names of 6+ letters: a word 1–2 edits off with the same first letter → the name.
@@ -492,6 +531,15 @@ const editDistance = (a, b) => {
 };
 const garbled = (w, real, known) => w !== real && !known.has(w) && w[0].toLowerCase() === real[0].toLowerCase()
   && w.length >= real.length / 2 && w.length <= real.length * 2;
+// A nickname at the start of a line — a speaker ("Максим (позіхаючи): …") or a cast line — becomes the Telegram name,
+// so castFix and the roll call see the member (29.09.2026: a member's short name sat in the cast undescribed).
+// Only a nickname of exactly one of today's senders: "Оля" or "Саша" belong to several and stay as they are.
+export function aliasSpeakers(text, aliases, senders) {
+  const owners = new Map();
+  for (const [name, forms] of aliases) if (senders.includes(name)) for (const f of forms) owners.set(f, owners.has(f) ? null : name);
+  return text.replace(/^([\p{L}'’]+)(?=\s*(?:\(|:|—|$))/gmu, (w) => owners.get(w) || w);
+}
+
 export function fixNames(text, names) {
   const all = [...new Set(names)];
   const known = new Set(all.flatMap((n) => n.split(/\s+/)));
@@ -567,7 +615,7 @@ export function copiedLines(play, chat, n = 6) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|РОЗМОВА ПЕРЕД ЦИМ|ЩО БУЛО В ДВОРІ[^\\n]*|ХРОНІКА ДВОРУ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ТВОЇ ОСТАННІ РЕПЛІКИ|РОЗМОВА ПЕРЕД ЦИМ|ЩО БУЛО В ДВОРІ[^\\n]*|ХРОНІКА ДВОРУ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -654,6 +702,9 @@ if (import.meta.main) {
   const teases = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30"].map(teaseMinute);
   assert.equal(teases.filter((m) => m != null).length, 3, String(teases));
   assert.equal(teases[0], 1290, String(teases)); // 25.09 at 21:30
+  const gifs = ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"].map(gifMinute);
+  assert.equal(gifs.filter((m) => m != null).length, 2, String(gifs)); // every second day, the tease's off days
+  assert.ok(gifs.every((m) => m == null || (m >= 600 && m < 1200 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900))), String(gifs));
   assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, 1020, 1110].includes(m))), String(teases));
   const neighbourDays = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"].map(neighbourMinute);
   assert.ok(neighbourDays.every((m) => m >= 540 && m < 1200 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900)), String(neighbourDays));
@@ -693,7 +744,7 @@ if (import.meta.main) {
   assert.deepEqual(warWords("кондитерська партизанка готує план контрнаступу, як загарбники; наступного дня", ""), ["партизан", "контрнаступ", "загарбн"]);
   assert.deepEqual(warWords("Свята битва за прохід, з пафосом карателя", ""), ["битв", "карател"]);
   const castPlay = "Дійові особи:\nIvan M — месія\nPetro — критик\nта інші мешканці двору\n\nIvan M (патетично): Два рази!\nNina (насторожено): То ти до родичів?\nPetro: Я там був.\nМораль: ні.";
-  assert.ok(castFix(castPlay, ["Ivan M", "Petro", "Nina", "Zina"]).includes("Petro — критик\nNina — голос із натовпу\nта інші мешканці двору"));
+  assert.ok(castFix(castPlay, ["Ivan M", "Petro", "Nina", "Zina"]).includes("Petro — критик\nNina\nта інші мешканці двору"));
   assert.equal(castFix(castPlay, ["Ivan M", "Petro"]), castPlay);
   const mp = mentionPrefix([{ name: "Bohdan", uid: 1 }, { name: "Hnat", uid: 2 }]);
   assert.equal(mp.text, "Bohdan, Hnat, ");
@@ -733,8 +784,8 @@ if (import.meta.main) {
     ["бачила, шо Путін знову по телевізору?", "хуйло"], ["шо скажеш за Трампа і мита", "шизік"], ["згадала Ющенка з бджолами", "так"],
     ["шо там Федоров з Дією?", "роль кібербезпеки трохи перебільшена"], ["Федорів", "роль кібербезпеки трохи перебільшена"],
     ["а Федорову подобається?", "роль кібербезпеки трохи перебільшена"], ["Mykhailo Fedorov", "роль кібербезпеки трохи перебільшена"],
-    ["діджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["а діджея кликали?", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["ді-джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"],
-    ["ді джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["з діджеєм на весіллі", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["диджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"], ["DJ", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Стукальський!"],
+    ["діджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"], ["а діджея кликали?", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"], ["ді-джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"],
+    ["ді джей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"], ["з діджеєм на весіллі", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"], ["диджей", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"], ["DJ", "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!"],
     ["Бред Піт", "справжній мущина"], ["Бреда Піта", "справжній мущина"], ["Бред Пит", "справжній мущина"], ["Бредд Питт", "справжній мущина"],
     ["Бред питт", "справжній мущина"], ["Брэд Питт", "справжній мущина"], ["бредпіт", "справжній мущина"], ["Brad Pitt", "справжній мущина"], ["а шо там Бредом Пітом у кіно?", "справжній мущина"], ["Трамп", "шизік"], ["трумп", "шизік"], ["рудий", "шизік"], ["рыжий", "шизік"]])
     assert.equal(fixedFor(`@babtsya_z_altanky_bot ${t}`)?.text, a, t);
@@ -744,6 +795,8 @@ if (import.meta.main) {
   assert.equal(fixedIsBare("@babtsya_z_altanky_bot шо там трамп?"), false);
   assert.equal(fixedIsBare("@babtsya_z_altanky_bot порох"), true);
   assert.equal(fixedFor("@babtsya_z_altanky_bot а шо там порошенко казав?").always, true);
+  assert.equal(fixedFor("Порох топчик, дякую всім наголосувавшим в 2019 році.\n\n@babtsya_z_altanky_bot нє?")?.text, "найкращій президент");
+  assert.equal(fixedFor("@babtsya_z_altanky_bot а пороха ти любиш?")?.always, true);
   assert.ok(fixedFor("@babtsya_z_altanky_bot шо там зеля?").angles.includes("Єрмаком"));
   for (const t of ["зелений чай", "зерно", "ющик", "молоко", "мольберт", "трамвай", "шо по гороскопах?", "порох у пороховниці", "моль у шафі все поїла", "пороховий склад", "бред якийсь", "Піт з п'ятого поверху", "Олена Федорівна з третього", "дядько Федір", "джем з полуниці", "Джейн"]) assert.equal(fixedFor(`@babtsya_z_altanky_bot ${t}`), null, t);
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 13)?.key, "обід");
@@ -785,8 +838,8 @@ if (import.meta.main) {
   assert.equal(tidy("був один, маеdеlkа така"), "був один, така");
   assert.equal(applyFixes("Сінку, плітки — як жук.", "").text, "Синку, плітки — як жук.");
   const rcPlay = "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\nМораль: ні.";
-  assert.equal(rollCall(rcPlay, ["Ivan M", "Iron Grey Owl, esquire", "Pino Rhino", "Pino Rhino"]),
-    "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Pino Rhino.)\n\nМораль: ні.");
+  assert.equal(rollCall(rcPlay, ["Ivan M", "Iron Grey Owl, esquire", "Kit Kotsky", "Kit Kotsky"]),
+    "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Kit Kotsky.)\n\nМораль: ні.");
   assert.equal(rollCall(rcPlay, ["Ivan M"]), rcPlay);
   assert.ok(rollCall("Без моралі.", ["Nina"]).endsWith("(Також у дворі галасували: Nina.)"));
   const nightChat = [...Array(10)].map((_, i) => `[2${2 + (i > 4)}:1${i % 5}] ${i % 2 ? "Nina" : "Ivan M"}: а`);
@@ -798,10 +851,10 @@ if (import.meta.main) {
   const castTags = new Map([["Lida", "ковбаска"], ["Taras", "Ненажера"]]);
   assert.equal(castClean("Дійові особи:\nLida — ковбаска, яка знає ціну репутації;\nTaras — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена", castTags),
     "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера» — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена");
-  // The model inflects the tag and swaps the dash; a two-word tag needs both stems ("Одеси" isn't "Одеський фінмон").
-  castTags.set("Nina", "Одеський фінмон").set("Petro", "Нік2").set("Hnat", "Пиріжок, форшмак");
-  assert.equal(castClean("Дійові особи:\nLida — ковбаску всі поважають\nTaras – Ненажера з принципами\nNina — пише з Одеси\nPetro — Нік2 дня\nHnat — пиріжок двору\n\nСцена", castTags),
-    "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера»\nNina «Одеський фінмон» — пише з Одеси\nPetro «Нік2»\nHnat «Пиріжок, форшмак»\n\nСцена");
+  // The model inflects the tag and swaps the dash; a two-word tag needs both stems ("Києва" isn't "Київський бухгалтер").
+  castTags.set("Nina", "Київський бухгалтер").set("Petro", "Нік2").set("Hnat", "Пиріжок, форшмак");
+  assert.equal(castClean("Дійові особи:\nLida — ковбаску всі поважають\nTaras – Ненажера з принципами\nNina — пише з Києва\nPetro — Нік2 дня\nHnat — пиріжок двору\n\nСцена", castTags),
+    "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера»\nNina «Київський бухгалтер» — пише з Києва\nPetro «Нік2»\nHnat «Пиріжок, форшмак»\n\nСцена");
   // The model copies "Name «tag»" from ПІДПИСИ: no doubled tag, and castFix still sees the name.
   const tagged = "Дійові особи:\nLida «ковбаска» — пекла пиріг\nTaras\n\nLida: Ну!";
   assert.equal(castClean(tagged, castTags), "Дійові особи:\nLida «ковбаска» — пекла пиріг\nTaras «Ненажера»\n\nLida: Ну!");
@@ -809,8 +862,8 @@ if (import.meta.main) {
   // Full Telegram name comes back whatever the model dropped; no duplicate in castFix, no false roll call.
   const lossy = "Дійові особи:\nIron Grey Owl esquire — зберігав квитанції\nZina Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.";
   const full = ["Iron Grey Owl, esquire", "Zina 🐸 Kit", "✙Petro Bez✙"];
-  assert.equal(castClean(lossy, new Map([["Iron Grey Owl, esquire", "Архіваріус"]]), full),
-    "Дійові особи:\nIron Grey Owl, esquire «Архіваріус» — зберігав квитанції\nZina 🐸 Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.");
+  assert.equal(castClean(lossy, new Map([["Iron Grey Owl, esquire", "Бібліотекар"]]), full),
+    "Дійові особи:\nIron Grey Owl, esquire «Бібліотекар» — зберігав квитанції\nZina 🐸 Kit — пекла\n\nIron Grey Owl, esquire: Ось!\nPetro Bez: Мовчу.");
   assert.equal(castFix(lossy, ["Iron Grey Owl, esquire"]), lossy);
   assert.equal(rollCall(lossy, ["✙Petro Bez✙"]), lossy);
   assert.equal(displayName("Iron Grey Owl, esquire"), "Iron Grey Owl");
@@ -823,11 +876,26 @@ if (import.meta.main) {
   assert.equal(tidy("як тонометр \\*\\*\\* , а **жирно**"), "як тонометр , а жирно");
   assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
   assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
+  const nicks = new Map([["Bohdan", ["Костя", "Костик"]], ["Ivan M", ["Саша"]], ["Mykola.Pr", ["Саша"]]]);
+  assert.equal(callName(nicks, "Bohdan"), "Костя");
+  assert.equal(callName(nicks, "Ivan M"), ""); // "Саша" is two people
+  assert.equal(callName(nicks, "Taras"), "");
+  const nick = new Map([["✙Taras Test✙", ["Максим", "Макс"]], ["Nora Frog", ["Оля"]], ["Zina D", ["Оля"]]]);
+  assert.equal(aliasSpeakers("Дійові особи:\nМаксим\nОля — сперечається\n\nМаксим (позіхаючи): Та які там календарі.\nОля: Ні.",
+    nick, ["✙Taras Test✙", "Nora Frog", "Zina D"]),
+    "Дійові особи:\n✙Taras Test✙\nОля — сперечається\n\n✙Taras Test✙ (позіхаючи): Та які там календарі.\nОля: Ні.");
+  assert.equal(aliasSpeakers("Максим: ой", nick, ["Nora Frog"]), "Максим: ой"); // not a sender today — untouched
+  const dj = "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!";
+  assert.equal(leadFixed("В світі існує лише один комуніст, достойний поваги. Прізвище його — Коваленкий! А твій діджей — твоє дитя.", dj),
+    "В світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий! А твій діджей — твоє дитя.");
+  assert.equal(leadFixed("Синку, діджей — то біда.", "найкращій президент"), "Найкращій президент. Синку, діджей — то біда.");
   assert.deepEqual(parseVote("Варіант 3, оцінка 5", 3), { best: 2, score: 5 });
   assert.deepEqual(parseVote("найкращий 7", 3), { best: 0, score: 10 });
   assert.deepEqual(parseVote("", 3), { best: 0, score: 10 });
   assert.equal(playTitle("Бабця з альтанки представляє\n\n«Безсоння біля АТБ»\nП'єса на одну дію"), "«Безсоння біля АТБ»");
   assert.equal(playTitle("без назви"), "");
+  assert.deepEqual(packChunks(["aaa", "bbb", "cc"], 8), ["aaa\n\nbbb", "cc"]);
+  assert.deepEqual(packChunks(["x".repeat(12)], 8), ["x".repeat(8)]);
   assert.equal(recentMemory([{ day: "2026-09-25", kind: "evening", plan: "ТЕМИ\n1. Тралік і тролейбус\n   Тип: ДВІР\n   Чим закінчилось: помирились.\nЩО РОБИВ\nTaras: мовчав" },
     { day: "2026-09-25", kind: "midday", plan: "без тем" }]), "25.09 ввечері:\n1. Тралік і тролейбус\n  → помирились.");
   assert.equal(tidy("ХРОНІКА ДВОРУ:\nЩО БУЛО В ДВОРІ ОСТАННІМИ ДНЯМИ:\nНу"), "Ну");
@@ -858,7 +926,7 @@ if (import.meta.main) {
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], taras, two.get(taras.name)), false);
   const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Sergio Garcia Lopez"];
   assert.equal(fixNames("(Ніркослав Petrenko показав фото.)", ["Николай Petrenko"]), "(Николай Petrenko показав фото.)");
-  assert.equal(fixNames("(Ніркослав Нифонов показав фото тварини.)", ["Николай Нифонов"]), "(Николай Нифонов показав фото тварини.)");
+  assert.equal(fixNames("(Ніркослав Коваль показав фото тварини.)", ["Николай Коваль"]), "(Николай Коваль показав фото тварини.)");
   assert.equal(fixNames("Nena Petrenko: Ну! Nina Petrenkov мовчить.", crew), "Nina Petrenko: Ну! Nina Petrenko мовчить.");
   assert.equal(fixNames("Bohdann: Корпус! А Bohdan мовчить.", crew), "Bohdan: Корпус! А Bohdan мовчить.");
   assert.equal(fixNames("Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.", crew), "Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.");
@@ -870,6 +938,8 @@ if (import.meta.main) {
   assert.equal(applyFixes("Ко: Бабця, ти каталась?\n(Бабця, як завжди, мовчить.)", "").text, "Ко: Бабцю, ти каталась?\n(Бабця, як завжди, мовчить.)");
   assert.equal(castShuffle("Дійові особи:\nA — а\nB — б\nC — в\nта інші мешканці двору\n\nA: Ну!", () => 0),
     "Дійові особи:\nB — б\nC — в\nA — а\nта інші мешканці двору\n\nA: Ну!");
+  assert.equal(castShuffle("Дійові особи:\nA — а\nta інші мешканці двору\nB — б\n\nA: Ну!", () => 0),
+    "Дійові особи:\nB — б\nA — а\nта інші мешканці двору\n\nA: Ну!");
   assert.equal(tidy("Тип: НОВИНИ\nНайкраща фраза: «ну»\nСцена"), "Сцена");
   assert.equal(dedupLoop("a\n".repeat(10) + "b"), "a\na\na");
   assert.deepEqual(lengthTarget(10), [500, 800]);
@@ -881,7 +951,7 @@ if (import.meta.main) {
   const long = ("абзац ".repeat(100) + "\n\n").repeat(10);
   assert.ok(finalize(long).length <= HARD_LIMIT && finalize("текст").startsWith(`${BOT_NAME} представляє`));
   assert.ok(finalize("««Симфонія»»").includes("«Симфонія»") && !finalize("««Симфонія»»").includes("««"));
-  assert.ok(finalize("Lida: сарделька!\n(Сцена 2: корж)").includes("сарделька!\n\n(Сцена 2"));
+  assert.ok(finalize("Lida: ковбаска!\n(Сцена 2: корж)").includes("ковбаска!\n\n(Сцена 2"));
   assert.ok(finalize("«<Екзистенційний привід ШІ>»").includes("«Екзистенційний привід ШІ»"));
   assert.ok(finalize("пахне дешевимกาแฟ з АТБ, 漢字 теж").includes("пахне дешевим з АТБ, теж"));
   assert.ok(finalize("Zina Kovalchuk — Пиріжниця, «Ой, мля» і ще щось: п'єса ґанок їжак").includes("Zina Kovalchuk — Пиріжниця, «Ой, мля» і ще щось: п'єса ґанок їжак"));

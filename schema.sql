@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS people_notes (
   updated INTEGER NOT NULL
 );
 
+-- Her own recent lines (tag replies, grumbles), 3 days: the next drafts and the judge see them and don't repeat their
+-- images, words and openers — the perforator came back again and again (29.09.2026).
+CREATE TABLE IF NOT EXISTS said (
+  ts INTEGER NOT NULL,
+  text TEXT NOT NULL
+);
+
 -- Name → Telegram user id, refreshed from every message: a real tag (text_mention) needs the id. Kept across digests.
 CREATE TABLE IF NOT EXISTS people (
   name TEXT PRIMARY KEY,

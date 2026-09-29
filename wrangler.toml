@@ -30,7 +30,9 @@ GROUP_CHAT_ID = "-100XXXXXXXXXX" # your group id: DEPLOY.md, stages 2 and 6
 TEST_CHAT_ID = "0" # your private chat with the bot, for TEST_MODE = "1"
 # Real-life names members are called by, "Name in Telegram: form, form; …" — whom "дай ліді рецепт" is for.
 ALIASES = "" # optional: "Name in Telegram: nickname, nickname; ..."
-PEOPLE_NOTES = "0" # C: "1" — weekly per-member notes into people_notes (read nowhere yet)
+PEOPLE_NOTES = "0" # "1" — weekly per-member notes (people_notes)
+# Titles from the group member list (29.09.2026) — shown to the reply brief as jokes, not used for addressing.
+TITLES = "" # optional: "Name in Telegram: group title; ..." — jokes for replies
 TEASE = "" # optional: a tease sent every second day at 16:00-23:00
 TEST_MODE = "0" # 0 — вижимки йдуть у групу GROUP_CHAT_ID; 1 — тобі в особисті
 
