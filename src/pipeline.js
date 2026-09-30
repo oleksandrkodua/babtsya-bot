@@ -107,10 +107,14 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
 // ponytail: stem-in-chat heuristic — a metaphor slips through on a day a member wrote the same word.
 export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []).map((w) => w.toLowerCase()))].filter((w) => !chat.toLowerCase().includes(w));
 
-// Grumbles: every 90 min from 08:00 to 18:30 Kyiv (minutes of the day); 08:00 is always a morning one.
+// Grumbles: every 2 h from 08:00 to 18:00 Kyiv (minutes of the day; was every 90 min till 30.09.2026); 08:00 is always a morning one.
 // 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
-export const GRUMBLE_SLOTS = [480, 570, 660, 750, 840, 930, 1020, 1110];
-export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play only the 12:30 lunch call, nothing till 15:00
+// ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 23:00, then the evening play; the poll is sent by hand
+// (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
+export const ONE_OFF = { day: "2026-09-30", quietUntil: 23, evening: 23 };
+export const oneOff = (day) => (day === ONE_OFF.day ? ONE_OFF : null);
+export const GRUMBLE_SLOTS = [480, 600, 720, 840, 960, 1080];
+export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00 (the 14:00 grumble is skipped)
 const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tune on the real group
 
 // Сусід gets one phrase a day at a half-hour tick 09:00–19:30 that no regular grumble uses and that isn't in the
@@ -129,11 +133,35 @@ export const teaseMinute = (day) => {
 // 10:00–19:30 off the grumble ticks and the 13:00–15:00 quiet (user, 29.09.2026).
 const GIF_TICKS = Array.from({ length: 20 }, (_, i) => 600 + i * 30)
   .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
+// Not on Сусід's minute either: 30.09.2026 the GIF and his phrase both went at 10:30 — the next free tick then.
 export const gifMinute = (day) => {
   const d = Date.parse(day) / 864e5;
-  return d % 2 === 0 ? GIF_TICKS[(d / 2) % GIF_TICKS.length] : null;
+  if (d % 2 !== 0) return null;
+  const i = (d / 2) % GIF_TICKS.length, t = GIF_TICKS[i];
+  return t === neighbourMinute(day) ? GIF_TICKS[(i + 1) % GIF_TICKS.length] : t;
 };
 export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e5) * 7) % NEIGHBOUR_TICKS.length];
+
+// What the cron owes at a Kyiv day and minute of the day — the one schedule, read by scheduled() and by plan.mjs
+// (30.09.2026: a hand-copied plan.mjs would drift). Runtime guards (≥50 messages, already done, stock size, TEASE set,
+// no grumble right under a play) stay in scheduled().
+export const MIDDAY_MINUTE = 13 * 60, POLL_MINUTE = 21 * 60;
+export function due(day, m) {
+  const o = oneOff(day), hour = Math.floor(m / 60), out = [];
+  if (o && hour < o.quietUntil) return ["тиша"];
+  if (m === 120) out.push("закрити вчорашнє опитування");
+  if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) out.push("хроніка тижня");
+  if (m >= 240 && m <= 330) out.push("запас м'яса");
+  if (m === MIDDAY_MINUTE) out.push("денна п'єса");
+  if (hour >= 22 && !o) out.push("закрити опитування");
+  if (hour >= (o?.evening ?? 22)) out.push("вечірня п'єса");
+  if (GRUMBLE_SLOTS.includes(m)) out.push("бурчання");
+  if (m === neighbourMinute(day)) out.push("сусід");
+  if (m === teaseMinute(day)) out.push("підколка");
+  if (m === gifMinute(day)) out.push("гіфка");
+  if (m === POLL_MINUTE) out.push("опитування");
+  return out;
+}
 
 export const parseGrumbles = (txt) => {
   const out = {};
@@ -150,9 +178,9 @@ export const grumbleSection = (minute, recent) =>
   minute === 480 ? "ранок"
   : recent != null && recent >= HOT_MIN ? "гаряче"
   : recent != null && recent <= QUIET_MAX ? "тиша"
-  : minute < 600 ? "ранок"
+  : minute < 660 ? "ранок"
   : minute >= 720 && minute < 840 ? "обід"
-  : minute >= 1110 ? "вечір"
+  : minute >= 1080 ? "вечір"
   : "загальне";
 
 // Every answer opened "X, ти шо, з …" and the group noticed ("вона повторюється", 24.09.2026). Code picks the move,
@@ -227,14 +255,15 @@ export const stripHints = (text, image = "") =>
 // The answer is a reply, so naming the author is noise ("Ivan M, ще при Кучмі…", 24.09.2026). Full name, the part
 // before a comma ("Iron Grey Owl") and the first word are cut wherever they stand, then punctuation is mended.
 // The name she calls the addressee by (user, 29.09.2026: "answer by name if there's a link"): the first form in ALIASES,
-// written as the exact address ("Максиме", "Олю") — the model made "Алексею" of "Алекс". A shared form is fine here:
+// written as the exact address ("Тарасе", "Олю") — the model made "Івану" of "Іван". A shared form is fine here:
 // the reply goes to one person anyway (user, 30.09.2026: both Nina are "Олю", both Oleksandrs "Сашко").
 export const callName = (aliases, name) => aliases.get(name)?.[0] ?? "";
 
 export function dropName(text, name) {
   const forms = [...new Set([name, name.split(",")[0], name.split(" ")[0]].map((f) => f.trim()).filter((f) => f.length >= 3))];
   for (const f of forms.sort((a, b) => b.length - a.length)) {
-    text = text.replace(new RegExp(`^\\s*${esc(f)}\\s*[,:—-]?\\s*`, "i"), "").replace(new RegExp(`\\s+${esc(f)}(?=\\s*[,!?.:—]|$)`, "gi"), "");
+    // Whole word only: "Тарасе, …" (the vocative she is told to use) lost "Тарас" and went out as "Е, …" (30.09.2026).
+    text = text.replace(new RegExp(`^\\s*${esc(f)}(?![\\p{L}])\\s*[,:—-]?\\s*`, "iu"), "").replace(new RegExp(`\\s+${esc(f)}(?![\\p{L}])(?=\\s*[,!?.:—]|$)`, "giu"), "");
   }
   text = text.replace(/,\s*([,!?.])/g, "$1").trim();
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -264,6 +293,46 @@ const REPLY_TOPICS = [
   // "дай рецепт оладків на молоці" got a joke about an old TV (25.09.2026): a request gets the real thing, in her voice.
   { key: "рецепт", long: true, re: W("рецепт|як приготув|як зварит|що приготув|шо приготув|що зварит|шо зварит|что приготов|что свари|як спект|як засол|як посол|як зробит|как пригот|как свар|как испеч|как засол|как сдела"),
     hint: "Тема — рецепт: дай СПРАВЖНІЙ робочий рецепт того, що просять: інгредієнти з кількістю й 3–6 коротких кроків, рядками. По-бабциному — з бурчанням на початку й одним жартом наприкінці, але рецепт має бути правильний. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
+  // "розкажи анекдот" got a grumble about why jokes don't matter (30.09.2026): a request for a joke gets a real one —
+  // set-up and a punchline in the last line; the form is picked by code so they don't repeat.
+  { key: "анекдот", long: true, re: W("анекдот|анегдот|розкажи жарт|розкажи щось смішн|пожартуй|пошути|шутку(?![\\p{L}])|розсміш"),
+    hint: [
+      "Тема — анекдот: розкажи СПРАВЖНІЙ анекдот — коротку історію з зав'язкою й несподіваною кінцівкою в останньому рядку, 3–7 рядків. Класичний зачин «Приходить … до …». Героїв вигадай (без імен сусідів із чату), кінцівку не пояснюй. Одразу анекдот — без вступу перед ним і без висновку чи моралі після кінцівки.",
+      "Тема — анекдот: розкажи СПРАВЖНІЙ анекдот-діалог двох вигаданих персонажів з двору, 3–7 рядків, репліки з тире, остання репліка — несподівана кінцівка. Не пояснюй жарт. Одразу анекдот — без вступу перед ним і без висновку чи моралі після кінцівки.",
+      "Тема — анекдот: розкажи СПРАВЖНІЙ анекдот на тему того, про що зараз розмова в чаті, — коротка історія з несподіваною кінцівкою в останньому рядку, 3–7 рядків, герої вигадані. Не пояснюй жарт. Одразу анекдот — без вступу перед ним і без висновку чи моралі після кінцівки.",
+      "Тема — анекдот: розкажи СПРАВЖНІЙ старий анекдот, як бабця чула його ще в молодості, переказаний її словами, 3–7 рядків, кінцівка в останньому рядку. Не пояснюй жарт. Одразу анекдот — без вступу перед ним і без висновку чи моралі після кінцівки.",
+      "Тема — анекдот на три повтори: двічі все йде однаково, а втретє навпаки — у цьому кінцівка; 4–7 рядків, герої вигадані. Не пояснюй жарт. Одразу анекдот — без вступу перед ним і без висновку чи моралі після кінцівки.",
+    ] },
+  // 14 more formats (user, 30.09.2026: "штук 30, щоб була варіативність"). Narrow triggers, placed before the broad
+  // "плітки" («розкажи…») and "порада" («підкажи…», «порадь…»), so each takes only its own requests.
+  { key: "спір", re: W("розсуди|розсудіть|рассуди|рассудите|хто прав|кто прав|хто з нас прав|хто виграв суперечк|хто переміг у суперечц"),
+    hint: "Тема — суд бабці: розбери суперечку з розмови — позиція кожного одним рядком, потім вердикт: хто правий і чому, пафосно, як суддя на лавці. Переможця назви прямо." },
+  { key: "вибір", re: W("що краще|шо краще|что лучше|обери(?!\\s+карт)|вибери(?!\\s+карт)|выбери(?!\\s+карт)|що вибрати|шо вибрати|что выбрать"),
+    hint: "Тема — вибір: першим словом назви, що бабця обирає з того, що запропонували, далі один-два рядки чому — з побутовим аргументом. Не ухиляйся й не кажи «обидва»." },
+  { key: "кіно", long: true, re: W("що подивит|шо подивит|что посмотр|який фільм|який серіал|фільм на вечір|серіал на вечір|що почитат|шо почитат|что почитат|яку книжк|яку книгу|що пограт|у що пограт|во что поигр|яку гру(?![\\p{L}])"),
+    hint: "Тема — що подивитись, почитати чи у що пограти: назви 2–3 СПРАВЖНІ відомі назви саме того, що просять (з автором чи роком, якщо знаєш), до кожної — один рядок бабциної рецензії. Нічого не вигадуй: лише назви, що існують." },
+  { key: "прізвисько", re: W("прізвиськ|прозвищ|кличк|придумай ім|як мене назвати|як його назвати|як її назвати"),
+    hint: "Тема — прізвисько: придумай три варіанти прізвиська для того, про кого просять, — з того, чим він відомий у дворі й що каже в розмові; без зовнішності, здоров'я й образ. Третій — найсмішніший." },
+  { key: "підсумок", long: true, re: W("що я пропустив|шо я пропустив|что я пропустил|що було в чаті|шо було в чаті|про що ви тут|о чем вы тут|перекажи чат|коротко що тут"),
+    hint: "Тема — що пропустив автор: 3–5 коротких рядків про головне з РОЗМОВИ ПЕРЕД ЦИМ — про що говорили й чим скінчилось, як бабця з лавки переказує; без оцінок людей і без вигадок." },
+  { key: "байка", long: true, re: W("розкажи історі|розкажи байк|як було раніше|як було при союз|в молодості|у молодості|в твоїй молодост|за совка|при совках"),
+    hint: "Тема — бабцина байка з молодості: історія від першої особи з радянського двору чи заводу, 5–8 рядків, з конкретною деталлю й кінцівкою, що пасує до того, про що спитали." },
+  { key: "загадка", re: W("загадк|загадай(?!\\s+бажан)|вікторин|викторин|ребус"),
+    hint: "Тема — загадка: загадай одну загадку в риму чи з підступом, з побуту двору; окремим останнім рядком «Відгадка: …»." },
+  { key: "прокляття", re: W("прокляни|прокляніть|прокльон|благослови|благословення|наврочи|пороблен|порчу"),
+    hint: "Тема — народне прокляття чи благословення, як просять: 2–4 рядки урочисто, по-бабциному, з побутовими карами чи дарами — смішно, без справжньої злоби, здоров'я й смерті." },
+  { key: "насвари", re: W("насвари|посвари|обізви|облай|вилай|нагримай|розбери по кісточк|приструнь"),
+    hint: "Тема — насвари: по-сусідськи насвари того, кого просять, за те, що він робить у розмові, — пафосно й смішно, без зовнішності, здоров'я й справжніх образ; наприкінці бабця все одно його жаліє." },
+  { key: "комплімент", re: W("компліме|похвали(?![\\p{L}])|похваліть|похвалить|скажи щось приємне|скажи шось приємне|скажи что-то приятное"),
+    hint: "Тема — комплімент: похвали того, кого просять, за те, чим він відомий у дворі й що робить у розмові, — щиро, по-бабциному, з одним смішним порівнянням." },
+  { key: "слово", re: W("(?:що|шо) означає(?!\\s+(?:ц[еяі]й?|це|цей|ця|ці|для|то)(?![\\p{L}]))|что означает(?!\\s+(?:эт|для))|що значить слово|шо значить слово|что значит слово|поясни слово|розтлумач слово"),
+    hint: "Тема — що означає слово: поясни значення слова чи мему, про яке питають, — спершу справжнє значення одним реченням (якщо це місцеве слово двору — як його тут вживають), далі бабцин коментар." },
+  { key: "заява", long: true, re: W("напиши заяв|напиши скарг|напиши лист|напиши оголошенн|склади заяв|склади скарг"),
+    hint: "Тема — офіційний папір: напиши те, що просять (заяву, скаргу, лист чи оголошення), канцелярським стилем радянської установи: шапка, «Прошу…» чи «Доводжу до відома…», 4–8 рядків, дата й бабцин підпис." },
+  { key: "пісня", long: true, re: W("заспівай|пісн(?:ю|я|і)(?![\\p{L}])|пісеньк|песн[юяи](?![\\p{L}])|частушк|частівк|колискову"),
+    hint: "Тема — пісня: заспівай куплет і приспів (6–10 рядків у риму) про те, що просять, як бабця співає на лавці; у дужках — одна ремарка, як вона співає." },
+  { key: "план", re: W("чим зайнят|план на (?:день|вечір|вихідн)|куди піти|куди сходит|куда сходить|що робити на вихідн|шо робити на вихідн"),
+    hint: "Тема — план: розпиши авторові план на те, про що питає, 3–5 пунктів із часом, побутово й абсурдно, останній пункт — неодмінно до бабці на лавку." },
   // Horoscopes and fortune-telling on request (25.09.2026): code picks the kind each time, so they don't repeat.
   // A verse, a toast, a greeting (for the addressee if it's a reply to someone) — a format, not a one-liner (26.09.2026).
   { key: "вірш", long: true, re: W("вірш|стишок|стишк|стихотвор|стих(?:и|ами)?(?![\\p{L}])|тост(?:а|ом|и)?(?![\\p{L}])|привіта|поздрав|з днем народж|с днем рожд|з днюх|с днюх|частушк|пісеньк|песенк"),
@@ -327,7 +396,7 @@ const FIXED_REPLIES = [
     angles: "знову не бачив, як навколо крадуть; знову кудись полетів; знову відмазує друзів; грає в теніс з Єрмаком" },
   // Any form, anywhere in the message ("Порох топчик… @бабця нє?" got the general answer, 29.09.2026); always word for word.
   // "порох" is gunpowder too: the idiom "порох у порохівницях" stays out.
-  { re: W("порошенк|poroshenk|петр[оау] олексійович"), alt: /(?<![\p{L}])(?:порох|пороха|пороху|порохом|порохові)(?![\p{L}])(?!\s+[ув]\s+порох)/iu, text: "найкращій президент", always: true },
+  { re: W("порошенк|poroshenk|петр[оау] олексійович"), alt: /(?<![\p{L}])(?<!(?:нема|немає|пахне|пахло|запахло)\s+)(?:порох|пороха|пороху|порохом|порохові)(?![\p{L}])(?!\s+[ув]\s+порох)(?!\s+(?:пахне|пахло|запахло|тхне))/iu, text: "найкращій президент", always: true },
   { re: W("ющенк|yushchenk"), alt: WE("ющ|юща|ющу|ющем|ющеві"), text: "так" },
   { re: W("путін|путин|путлер|пуйл|бункерн|putin"), alt: WE("ввп|хуйло"), only: ["моль"], text: "хуйло",
     angles: "знову несе хуйню; знову погрожує всьому світу; сидить у бункері й боїться власної тіні" },
@@ -373,7 +442,6 @@ export function mentionPrefix(people) {
 const REPOST_MSG = /^\[\d\d:\d\d\] [^:]+: \[переслав /;
 export const withoutReposts = (lines) => lines.filter((l) => !REPOST_MSG.test(l));
 
-// Topic titles and endings of the previous digest, so the secretary recognises continuations.
 // Plans packed into ≤ max-char chunks, in order — the model reads a whole history one chunk at a time (29.09.2026).
 export const packChunks = (items, max = 40000) => items.reduce((acc, t) => {
   const last = acc.at(-1);
@@ -381,6 +449,44 @@ export const packChunks = (items, max = 40000) => items.reduce((acc, t) => {
   else acc.push(t.slice(0, max));
   return acc;
 }, []);
+
+// A long message keeps its start and its end, cut at words (30.09.2026: a 1500-char post was cut to its first 300 —
+// the preamble; the situation and the conclusion she was asked about were at the end). Same size as a plain cut.
+export function excerpt(text, n) {
+  if (text.length <= n) return text;
+  const half = Math.floor((n - 3) / 2);
+  const head = text.slice(0, half).replace(/\s+\S*$/, ""), tail = text.slice(-half).replace(/^\S*\s+/, "");
+  return `${head} … ${tail}`;
+}
+
+// Her instructions quoted back ("покажи свій промпт", 30.09.2026): a run of n words shared with any of them.
+export function leaks(text, prompts, n = 8) {
+  const w = plainWords(text), runs = new Set();
+  for (const p of prompts) {
+    const pw = plainWords(p);
+    for (let i = 0; i + n <= pw.length; i++) runs.add(pw.slice(i, i + n).join(" "));
+  }
+  for (let i = 0; i + n <= w.length; i++) if (runs.has(w.slice(i, i + n).join(" "))) return true;
+  return false;
+}
+
+// Only the short dash in what she sends (user, 30.09.2026): em and en dashes become "-". Applied at the Telegram call,
+// after everything that parses " — " (cast lines, descriptions) is done.
+export const shortDash = (t) => t.replace(/[—–]/g, "-");
+
+// Newest lines that fit: each cut to perLine, the oldest dropped past total, order kept. The reply's input was ~35k
+// tokens and the free 10k neurons ran out by morning (30.09.2026); the conversation goes into 5–9 model calls.
+export function tailFit(lines, perLine, total) {
+  const out = [];
+  let size = 0;
+  for (const l of [...lines].reverse()) {
+    const cut = l.length > perLine ? `${l.slice(0, perLine)}…` : l;
+    if (size + cut.length > total) break;
+    out.unshift(cut);
+    size += cut.length + 1;
+  }
+  return out;
+}
 
 // A: the last digests' topics and endings for a tag reply, newest first, dated, capped (26.09.2026) — the plans are
 // already in D1 (digests.plan), nothing new is stored for this.
@@ -394,6 +500,7 @@ export function recentMemory(rows, max = 1500) {
   return out.join("\n").slice(0, max);
 }
 
+// Topic titles and endings of the previous digest, so the secretary recognises continuations.
 export const prevContext = (plan) => {
   const keep = plan.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("ЧАСТИНА ") || /^\d+\.\s/.test(l) || l.startsWith("Чим закінчилось:"));
   return keep.length ? `КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ (уже переказано; лише щоб упізнати продовження):\n${keep.join("\n").slice(0, 2500)}\n\n` : "";
@@ -485,12 +592,29 @@ export function nightLine(lines) {
     : `${head} Перша сцена — «${NIGHT_TITLES[Math.floor(Math.random() * NIGHT_TITLES.length)]}».`;
 }
 
+// Every member in «Дійові особи» gets a description (user, 30.09.2026: "Mykola.Pr «Нік2»" with none is High — the
+// cast says who did what). castBare lists the bare ones, castDescribe puts the model's "Name — опис" lines in.
+const castBody = (l, i) => i > 0 && l.trim() && !/^та інші/i.test(l);
+export const castBare = (play) => {
+  const out = [];
+  editCast(play, (lines) => (lines.forEach((l, i) => castBody(l, i) && !l.match(CAST_LINE)[2] && out.push(castName(l))), lines));
+  return out;
+};
+export const castDescribe = (play, answer) => {
+  const got = new Map(answer.split("\n").map((l) => l.replace(/^[-•*\s]+/, "").match(/^(.+?)\s*(?:«[^»]*»)?\s*[—–:-]\s*(.{3,80})$/)).filter(Boolean)
+    .map(([, n, d]) => [nameKey(n), d.trim().replace(/\.$/, "")]));
+  return editCast(play, (lines) => lines.map((l, i) => {
+    const d = castBody(l, i) && !l.match(CAST_LINE)[2] && got.get(nameKey(castName(l)));
+    return d ? `${l.trimEnd()} — ${d}` : l;
+  }));
+};
+
 export function rollCall(play, names) {
   const flat = nameKey(play);
   const missing = [...new Set(names)].filter((n) => !flat.includes(nameKey(n.split(",")[0])));
   if (!missing.length) return play;
   const who = missing.length > 12 ? `${missing.slice(0, 12).join(", ")} та ще ${missing.length - 12}` : missing.join(", ");
-  return beforeMoral(play, `(Також у дворі галасували: ${who}.)`);
+  return beforeMoral(play, `(Також у дворі галасували: ${who.replace(/\.$/, "")}.)`); // a name ending in "." got ".." (30.09.2026)
 }
 
 // The reply judge answers "2 8" — best draft and its score 1–10. Garbage picks the first draft and counts as
@@ -528,12 +652,13 @@ const editDistance = (a, b) => {
 };
 const garbled = (w, real, known) => w !== real && !known.has(w) && w[0].toLowerCase() === real[0].toLowerCase()
   && w.length >= real.length / 2 && w.length <= real.length * 2;
-// A nickname at the start of a line — a speaker ("Максим (позіхаючи): …") or a cast line — becomes the Telegram name,
+// A nickname at the start of a line — a speaker ("Тарас (позіхаючи): …") or a cast line — becomes the Telegram name,
 // so castFix and the roll call see the member (29.09.2026: a member's short name sat in the cast undescribed).
 // Only a nickname of exactly one of today's senders: "Оля" or "Саша" belong to several and stay as they are.
 export function aliasSpeakers(text, aliases, senders) {
   const owners = new Map();
-  for (const [name, forms] of aliases) if (senders.includes(name)) for (const f of forms) owners.set(f, owners.has(f) ? null : name);
+  // A form that is itself a sender's Telegram name ("Олександр") would rename that sender's lines — skipped.
+  for (const [name, forms] of aliases) if (senders.includes(name)) for (const f of forms) if (!senders.includes(f)) owners.set(f, owners.has(f) ? null : name);
   return text.replace(/^([\p{L}'’]+)(?=\s*(?:\(|:|—|$))/gmu, (w) => owners.get(w) || w);
 }
 
@@ -674,13 +799,15 @@ const fixMixed = (t) => t.replace(/\p{L}+/gu, (w) => {
 const STUTTER = /(?<![\p{L}])(що|як|і|й|в|у|на|з|до|та|не|це|бо|же)(?:,?\s+\1)+(?![\p{L}])/giu;
 // "сука" became a tic at every reply's end (user, 29.09.2026: "прибери це слово"): cut with its commas; a sentence it
 // opened gets its capital back. Other swearing stays — it's her style.
+// A sentence start is also after "Name: " and a dash ("Taras: Сука, ти шо?" became "Taras:, ти шо?" — review 30.09.2026).
 const noSuka = (t) => t.replace(/,\s*сук[аоу](?![\p{L}])/giu, "")
-  .replace(/(^|[.!?…]\s+)сук[аоу](?![\p{L}])[,!]?\s*(\p{L})?/gimu, (m, start, next = "") => start + next.toUpperCase())
+  .replace(/(^|[.!?…:]\s+|[—–-]\s+)сук[аоу](?![\p{L}])[,!.]?\s*(\p{L})?/gimu, (m, start, next = "") => (next ? start + next.toUpperCase() : start.trimEnd()))
   .replace(/\s*(?<![\p{L}])сук[аоу](?![\p{L}])/giu, "");
+// Any link is cut from what she writes: one dictated to her in words never goes out (30.09.2026).
 export const tidy = (text) =>
   noSuka(SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
-    fixMixed(unmention(text)).replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
+    fixMixed(unmention(text)).replace(/(?:https?:\/\/|www\.|t\.me\/|(?<![\w@.])[\w-]+\.(?:com|net|org|ua|ru|me|io|xyz|info|site|online|top|link|app|dev)(?![\w]))\S*?(?=[.,;:!?)»]*(?:\s|$))/gi, "…").replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
       .replace(/«<([^<>»\n]*)>»/g, "«$1»") // the template's «<назва>» copied verbatim (24.09.2026)
       .replace(SERVICE_LINE, ""),
   )
@@ -741,7 +868,7 @@ if (import.meta.main) {
   const gifs = ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"].map(gifMinute);
   assert.equal(gifs.filter((m) => m != null).length, 2, String(gifs)); // every second day, the tease's off days
   assert.ok(gifs.every((m) => m == null || (m >= 600 && m < 1200 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900))), String(gifs));
-  assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, 1020, 1110].includes(m))), String(teases));
+  assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, ...GRUMBLE_SLOTS].includes(m))), String(teases));
   const neighbourDays = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"].map(neighbourMinute);
   assert.ok(neighbourDays.every((m) => m >= 540 && m < 1200 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900)), String(neighbourDays));
   assert.ok(new Set(neighbourDays).size > 1, "different days, different times");
@@ -833,6 +960,8 @@ if (import.meta.main) {
   assert.equal(fixedFor("@babtsya_z_altanky_bot а шо там порошенко казав?").always, true);
   assert.equal(fixedFor("Порох топчик, дякую всім наголосувавшим в 2019 році.\n\n@babtsya_z_altanky_bot нє?")?.text, "найкращій президент");
   assert.equal(fixedFor("@babtsya_z_altanky_bot а пороха ти любиш?")?.always, true);
+  // Idioms are gunpowder, not the man (user, 30.09.2026).
+  for (const t of ["у нього вже нема пороху", "тут порохом пахне", "пахне порохом, синку", "немає пороху в пороховниці"]) assert.equal(fixedFor(t), null, t);
   assert.ok(fixedFor("@babtsya_z_altanky_bot шо там зеля?").angles.includes("Єрмаком"));
   for (const t of ["зелений чай", "зерно", "ющик", "молоко", "мольберт", "трамвай", "шо по гороскопах?", "порох у пороховниці", "моль у шафі все поїла", "пороховий склад", "бред якийсь", "Піт з п'ятого поверху", "Олена Федорівна з третього", "дядько Федір", "джем з полуниці", "Джейн"]) assert.equal(fixedFor(`@babtsya_z_altanky_bot ${t}`), null, t);
   assert.equal(topicFor("@babtsya_z_altanky_bot а можна щоб обідать кликала?", 13)?.key, "обід");
@@ -878,6 +1007,11 @@ if (import.meta.main) {
     "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Kit Kotsky.)\n\nМораль: ні.");
   assert.equal(rollCall(rcPlay, ["Ivan M"]), rcPlay);
   assert.ok(rollCall("Без моралі.", ["Nina"]).endsWith("(Також у дворі галасували: Nina.)"));
+  const bare = "Дійові особи:\nIvan M «Нік2»\nLida «ковбаска» — їсть сливи\nта інші мешканці двору\n\nIvan M: Так.";
+  assert.deepEqual(castBare(bare), ["Ivan M"]);
+  assert.ok(castDescribe(bare, "Ivan M — ховається від фото").includes("Ivan M «Нік2» — ховається від фото\nLida «ковбаска» — їсть сливи"));
+  assert.deepEqual(castBare(castDescribe(bare, "Ivan M — ховається від фото")), []);
+  assert.ok(rollCall("Без моралі.", ["Пан R N."]).endsWith("(Також у дворі галасували: Пан R N.)"));
   const nightChat = [...Array(10)].map((_, i) => `[2${2 + (i > 4)}:1${i % 5}] ${i % 2 ? "Nina" : "Ivan M"}: а`);
   const night = nightLine([...nightChat, "[08:00] Lida: г", "[22:05] Lida: д"]);
   assert.ok(night.startsWith("НІЧ: 10 повідомлень 22:10–23:14, учасники: Ivan M, Nina. Перша сцена — «"), night);
@@ -912,22 +1046,63 @@ if (import.meta.main) {
   assert.equal(tidy("як тонометр \\*\\*\\* , а **жирно**"), "як тонометр , а жирно");
   assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
   assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
+  assert.deepEqual(due("2026-09-30", 1260), ["тиша"]);
+  assert.ok(due("2026-09-30", 1380).includes("вечірня п'єса") && !due("2026-09-30", 1380).includes("закрити опитування"));
+  assert.ok(due("2026-10-01", 1260).includes("опитування") && due("2026-10-01", 1320).includes("вечірня п'єса"));
+  assert.ok(due("2026-10-01", 120).includes("закрити вчорашнє опитування"));
+  assert.equal(oneOff("2026-09-30")?.evening, 23);
+  assert.equal(oneOff("2026-10-01"), null);
+  // review 30.09.2026: vocatives, "Name: Сука", bare domains, trigger false positives
+  assert.deepEqual(misattributed(aliasSpeakers("Ніна (гордо): Я знову купила ковбасу на всю пенсію!", new Map([["Lida", ["Ніна"]]]), ["Lida"]),
+    ["[10:00] Lida: я знову купила ковбасу на всю пенсію"]), []);
+  assert.equal(dropName("Тарасе, не сци.", "Тарас"), "Тарасе, не сци.");
+  assert.equal(dropName("Тарас, не сци.", "Тарас"), "Не сци.");
+  assert.equal(tidy("Taras: Сука, ти шо?"), "Taras: Ти шо?");
+  assert.equal(tidy("— Сука, знову?"), "— Знову?");
+  assert.equal(tidy("Ну. Сука!"), "Ну.");
+  assert.equal(tidy("Заходь на evil.com/x, синку."), "Заходь на …, синку.");
+  assert.equal(tidy("Ціна 12.50 грн, файл звіт.txt лишається."), "Ціна 12.50 грн, файл звіт.txt лишається.");
+  for (const [q, key] of [["ти шо, шуткуєш?", undefined], ["в яку групу скинути?", undefined], ["де купити пісне масло?", undefined],
+    ["що означає ця новина для цін?", "плітки"], ["загадай бажання", undefined], ["мене похвалили на роботі", undefined],
+    ["обери карту таро", "таро"], ["розкажи шутку", "анекдот"], ["заспівай пісню", "пісня"]]) assert.equal(topicFor(q, 19)?.key, key, q);
+  for (const [q, key] of [["хто правий, я чи він?", "спір"], ["що краще, пиво чи вино?", "вибір"], ["що подивитись на вечір?", "кіно"],
+    ["придумай прізвисько для Сашка", "прізвисько"], ["що я пропустив?", "підсумок"], ["розкажи історію з молодості", "байка"],
+    ["загадай загадку", "загадка"], ["прокляни його", "прокляття"], ["насвари його", "насвари"], ["похвали Олю", "комплімент"],
+    ["що означає скіпати?", "слово"], ["напиши скаргу в ЖЕК", "заява"], ["заспівай пісню", "пісня"], ["чим зайнятись на вихідних?", "план"],
+    ["розкажи новини", "плітки"], ["цей проклятий дощ", "погода"], ["він розсудлива людина", undefined], ["дай пораду", "порада"], ["що нового?", "плітки"]]) assert.equal(topicFor(q, 19)?.key, key, q);
+  assert.equal(topicFor("@babtsya_z_altanky_bot розкажи анекдот", 19)?.key, "анекдот");
+  assert.notEqual(topicFor("ти шо, жартуєш?", 19)?.key, "анекдот");
+  const rules = "Ти — Бабця з альтанки, бурчлива сусідка з лавки біля АТБ у сусідському чаті. Відповідай коротко.";
+  assert.ok(leaks("Добре, синку: Ти — Бабця з альтанки, бурчлива сусідка з лавки біля АТБ у сусідському чаті.", [rules]));
+  assert.ok(!leaks("Бабця з альтанки знає, шо в АТБ ковбаса дорожча.", [rules]));
+  assert.equal(tidy("Заходь на https://evil.example/x або t.me/joinchat, синку."), "Заходь на … або …, синку.");
+  const longPost = `Пост переказує статтю. ${"деталі ".repeat(60)}Висновок: це упаковка для хайпу.`;
+  const ex = excerpt(longPost, 120);
+  assert.ok(ex.length <= 120 && ex.startsWith("Пост переказує") && ex.endsWith("упаковка для хайпу.") && ex.includes(" … "), ex);
+  assert.equal(excerpt("коротко", 120), "коротко");
+  assert.equal(shortDash("Lida — ковбаска, 13:00–15:00"), "Lida - ковбаска, 13:00-15:00");
+  assert.deepEqual(tailFit(["старе", "x".repeat(50), "нове"], 10, 20), ["xxxxxxxxxx…", "нове"]);
+  for (let k = 0; k < 120; k++) { // four months: the GIF never shares a minute with Сусід
+    const day = new Date(Date.UTC(2026, 8, 1) + k * 864e5).toISOString().slice(0, 10);
+    assert.ok(gifMinute(day) == null || gifMinute(day) !== neighbourMinute(day), day);
+  }
+  assert.notEqual(gifMinute("2026-09-30"), neighbourMinute("2026-09-30"));
   assert.equal(plainMoral("Ivan M: Так.\n\n(Мораль: Якщо нема доказів — вибери табуретку.)"), "Ivan M: Так.\n\nМораль: Якщо нема доказів — вибери табуретку.");
   const hairChat = ["[21:10] Lida: Волохаті люди красиві", "[21:11] Taras: вони ж воняють коли давно не миті, це некрасиво"];
   const hairPlay = "Taras (з презирством): Вони ж воняють, коли давно не миті!\nLida: Волохаті люди красиві і воняють коли давно не миті!\nLida: Волохаті люди красиві, крапка.";
   assert.deepEqual(misattributed(hairPlay, hairChat), ["Lida: Волохаті люди красиві і воняють коли давно не миті!"]);
-  assert.equal(tidy("Кальвадос — це маска, за якою ховається морда, сука!"), "Кальвадос — це маска, за якою ховається морда!");
+  assert.equal(tidy("Сусід — це маска, за якою ховається морда, сука!"), "Сусід — це маска, за якою ховається морда!");
   assert.equal(tidy("Сука, ти шо, Костю? Ну, сука, дає."), "Ти шо, Костю? Ну, дає.");
   assert.equal(tidy("Біля суки й сучасного ринку."), "Біля суки й сучасного ринку."); // other words untouched
   const nicks = new Map([["Bohdan", ["Костя", "Костик"]], ["Ivan M", ["Саша"]], ["Mykola.Pr", ["Саша"]]]);
   assert.equal(callName(nicks, "Bohdan"), "Костя");
   assert.equal(callName(nicks, "Ivan M"), "Саша"); // shared is fine: the reply goes to one person
   assert.equal(callName(nicks, "Taras"), "");
-  const nick = new Map([["✙Taras Test✙", ["Максим", "Макс"]], ["Nora Frog", ["Оля"]], ["Zina D", ["Оля"]]]);
-  assert.equal(aliasSpeakers("Дійові особи:\nМаксим\nОля — сперечається\n\nМаксим (позіхаючи): Та які там календарі.\nОля: Ні.",
+  const nick = new Map([["✙Taras Test✙", ["Тарас", "Тарасик"]], ["Nora Frog", ["Оля"]], ["Zina D", ["Оля"]]]);
+  assert.equal(aliasSpeakers("Дійові особи:\nТарас\nОля — сперечається\n\nТарас (позіхаючи): Та які там календарі.\nОля: Ні.",
     nick, ["✙Taras Test✙", "Nora Frog", "Zina D"]),
     "Дійові особи:\n✙Taras Test✙\nОля — сперечається\n\n✙Taras Test✙ (позіхаючи): Та які там календарі.\nОля: Ні.");
-  assert.equal(aliasSpeakers("Максим: ой", nick, ["Nora Frog"]), "Максим: ой"); // not a sender today — untouched
+  assert.equal(aliasSpeakers("Тарас: ой", nick, ["Nora Frog"]), "Тарас: ой"); // not a sender today — untouched
   const dj = "в світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий!";
   assert.equal(leadFixed("В світі існує лише один комуніст, достойний поваги. Прізвище його — Коваленкий! А твій діджей — твоє дитя.", dj),
     "В світі існує лише один комуніст, достойний поваги. Прізвище його - Коваленкий! А твій діджей — твоє дитя.");
