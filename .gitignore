@@ -13,3 +13,4 @@ last-plan.json
 logs/last-plan-*.txt
 evidence/
 ChatExport*/
+logs/said-*.json

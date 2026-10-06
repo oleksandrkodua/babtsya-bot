@@ -33,7 +33,7 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже", кабачке: "кабачку", "в зенит": "в зеніті" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже", кабачке: "кабачку", "в зенит": "в зеніті", "на деле": "на ділі" };
 // "Бабця, ти сьогодні…" — addressing her needs the vocative (25.09.2026). Only at the start of a line or a reply,
 // so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
 const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
@@ -109,9 +109,9 @@ export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []
 
 // Grumbles: every 2 h from 08:00 to 18:00 Kyiv (minutes of the day; was every 90 min till 30.09.2026); 08:00 is always a morning one.
 // 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
-// ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 23:00, then the evening play; the poll is sent by hand
+// ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 22:30, then the evening play; the poll is sent by hand
 // (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
-export const ONE_OFF = { day: "2026-09-30", quietUntil: 23, evening: 23 };
+export const ONE_OFF = { day: "2026-09-30", quietUntil: 22 * 60 + 30, evening: 22 * 60 + 30 }; // minutes of the day
 export const oneOff = (day) => (day === ONE_OFF.day ? ONE_OFF : null);
 export const GRUMBLE_SLOTS = [480, 600, 720, 840, 960, 1080];
 export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00 (the 14:00 grumble is skipped)
@@ -148,13 +148,13 @@ export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e
 export const MIDDAY_MINUTE = 13 * 60, POLL_MINUTE = 21 * 60;
 export function due(day, m) {
   const o = oneOff(day), hour = Math.floor(m / 60), out = [];
-  if (o && hour < o.quietUntil) return ["тиша"];
+  if (o && m < o.quietUntil) return ["тиша"];
   if (m === 120) out.push("закрити вчорашнє опитування");
   if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) out.push("хроніка тижня");
   if (m >= 240 && m <= 330) out.push("запас м'яса");
   if (m === MIDDAY_MINUTE) out.push("денна п'єса");
   if (hour >= 22 && !o) out.push("закрити опитування");
-  if (hour >= (o?.evening ?? 22)) out.push("вечірня п'єса");
+  if (m >= (o?.evening ?? 22 * 60)) out.push("вечірня п'єса");
   if (GRUMBLE_SLOTS.includes(m)) out.push("бурчання");
   if (m === neighbourMinute(day)) out.push("сусід");
   if (m === teaseMinute(day)) out.push("підколка");
@@ -512,6 +512,38 @@ const WAR_FALLBACK = [
   [/(?<![\p{L}\p{N}_])терор(ом|у)?(?![\p{L}])/giu, (_, e) => ({ ом: "свавіллям", у: "свавілля" })[e?.toLowerCase()] || "свавілля"],
   [/(?<![\p{L}\p{N}_])війн(а|и|у|ою|і)(?![\p{L}])/giu, (_, e) => ({ а: "колотнеча", и: "колотнечі", у: "колотнечу", ою: "колотнечею", і: "колотнечі" })[e.toLowerCase()]],
 ];
+// Her tics (03.10.2026, screenshot evidence/replies/pafos-tic-03-10.webp): "пафосу, ніби ти тут …, а на деле …" twice in
+// a row and "завтра у всьому дворі буде такий …, шо навіть …" — the prompt's own word "пафос" echoed back. A draft with
+// a tic loses to any draft without one, before the judge; a tic the author wrote himself doesn't count.
+// The rest came from her last 80 replies (03.10.2026, logs/said-last80.json): ", блядь, а отже" in 40, "це як намагатися"
+// in 38 — one frame "X — це як намагатися …: шуму, блядь, на …, а на виході / а толку — …, а отже — …". "а отже" was
+// asked for by reply.txt and the judge; that ask is gone. The drafts with the fewest tics go on to the judge.
+const TICS = [/(?<![\p{L}])пафос/iu, /ніби ти тут/iu, /на деле(?![\p{L}])/iu, /завтра\s+(?:на|у|в)\s+(?:весь|всьому|усьому|цілому|цілий)\s+двор/iu,
+  /(?<![\p{L}])а отже(?![\p{L}])/iu, /це як намагат/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu];
+const ticCount = (d, asked) => TICS.filter((re) => re.test(d) && !re.test(asked)).length;
+export const ticFree = (drafts, asked) => {
+  const least = Math.min(...drafts.map((d) => ticCount(d, asked)));
+  return drafts.filter((d) => ticCount(d, asked) === least);
+};
+
+// "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. The limit is taken as the
+// last 24 hours, not a UTC day (seen twice 30.09; Cloudflare's docs say 00:00 UTC — rolling is the stricter of the two).
+// Both plays fall in any 24 h ahead, so for each one: what is spent in the 24 h before it (rows that slid out no longer
+// count), the plays up to it, and the small daily stuff pro rata, must leave room. Measured: a play with poster
+// ≈ 2–2.5k, a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
+export const NEURONS_DAY = 10000, PLAY_NEURONS = 2500, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
+export function repliesLeft(rows, nowMs, offsetSec) {
+  const DAY = 864e5, next = (h) => {
+    let t = Math.floor(nowMs / DAY) * DAY + h * 36e5 - offsetSec * 1000 - DAY;
+    while (t <= nowMs) t += DAY;
+    return t;
+  };
+  const room = PLAY_HOURS.map(next).sort((a, b) => a - b).map((t, i) => NEURONS_DAY
+    - rows.filter((r) => r.ts * 1000 > t - DAY).reduce((s, r) => s + r.neurons, 0)
+    - PLAY_NEURONS * (i + 1) - OTHER_NEURONS * (t - nowMs) / DAY);
+  return Math.max(0, Math.floor(Math.min(...room) / REPLY_NEURONS));
+}
+
 export const warFallback = (play, chat) =>
   WAR_FALLBACK.reduce((s, [re, fn]) => s.replace(re, (m, e) => (chat.toLowerCase().includes(m.toLowerCase()) ? m : fn(m, e))), play);
 
@@ -550,19 +582,24 @@ const leansOnTag = (desc, tag) => tag.toLowerCase().split(",").some((t) => {
 });
 export function castClean(play, tags, names = []) {
   const real = new Map([...names, ...tags.keys()].map((n) => [nameKey(n), n]));
-  return editCast(play, (lines) => lines.map((l) => {
-    const name = real.get(nameKey(castName(l))), desc = l.match(CAST_LINE)[2];
-    if (!name) return l;
-    const tag = tags.get(name);
-    return name + (tag ? ` «${tag}»` : "") + (desc && !(tag && leansOnTag(desc, tag)) ? ` — ${desc}` : "");
-  }));
+  // One line per member: "Danylo «Бубон»" and "Hnat «Бубон»" both stood in the cast (02.10.2026) — the described one stays.
+  return editCast(play, (lines) => {
+    const out = lines.map((l) => {
+      const name = real.get(nameKey(castName(l))), desc = l.match(CAST_LINE)[2];
+      if (!name) return { l };
+      const tag = tags.get(name), d = desc && !(tag && leansOnTag(desc, tag)) ? desc : "";
+      return { l: name + (tag ? ` «${tag}»` : "") + (d ? ` — ${d}` : ""), name, d };
+    });
+    return out.filter((x, i) => !x.name || out.findIndex((y) => y.name === x.name && (y.d || !x.d)) === i).map((x) => x.l);
+  });
 }
 
 // «Дійові особи» in a new order every time, "та інші мешканці двору" stays last (user, 25.09.2026).
 export const castShuffle = (play, rnd = Math.random) => editCast(play, ([head, ...body]) => {
-  // The model once wrote "ta інші" in Latin letters and it got shuffled into the middle (29.09.2026).
-  const isRest = (l) => /^[tт][aа]\s+інші/iu.test(l);
-  const rest = body.filter(isRest).map((l) => l.replace(/^[tт][aа]/iu, "та")), cast = body.filter((l) => !isRest(l));
+  // The model once wrote "ta інші" in Latin letters and it got shuffled into the middle (29.09.2026); on 02.10.2026 it
+  // wrote "Hnat, Petro, … Danylo та інші." — a list of everyone, shuffled in as one more "member".
+  const isRest = (l) => /^[tт][aа]\s+інші/iu.test(l) || (!l.match(CAST_LINE)[2] && /,.*\s[tт][aа]\s+інші/iu.test(l));
+  const rest = body.some(isRest) ? ["та інші мешканці двору"] : [], cast = body.filter((l) => !isRest(l));
   for (let i = cast.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [cast[i], cast[j]] = [cast[j], cast[i]];
@@ -659,7 +696,8 @@ export function aliasSpeakers(text, aliases, senders) {
   const owners = new Map();
   // A form that is itself a sender's Telegram name ("Олександр") would rename that sender's lines — skipped.
   for (const [name, forms] of aliases) if (senders.includes(name)) for (const f of forms) if (!senders.includes(f)) owners.set(f, owners.has(f) ? null : name);
-  return text.replace(/^([\p{L}'’]+)(?=\s*(?:\(|:|—|$))/gmu, (w) => owners.get(w) || w);
+  // Cast lines too: "Danylo «Бубон» - …" stood next to "Hnat «Бубон»" (02.10.2026).
+  return text.replace(/^([\p{L}'’]+)(?=\s*(?:\(|:|«|[—–-]\s|$))/gmu, (w) => owners.get(w) || w);
 }
 
 export function fixNames(text, names) {
@@ -803,9 +841,13 @@ const STUTTER = /(?<![\p{L}])(що|як|і|й|в|у|на|з|до|та|не|це|
 const noSuka = (t) => t.replace(/,\s*сук[аоу](?![\p{L}])/giu, "")
   .replace(/(^|[.!?…:]\s+|[—–-]\s+)сук[аоу](?![\p{L}])[,!.]?\s*(\p{L})?/gimu, (m, start, next = "") => (next ? start + next.toUpperCase() : start.trimEnd()))
   .replace(/\s*(?<![\p{L}])сук[аоу](?![\p{L}])/giu, "");
+// "суцільний …" is her tic ("це просто суцільна, блядь, важка тупизна", 03.10.2026) past the prompt rule and the judge's
+// minus two, so the word goes in code; at a sentence start the next word takes the capital.
+const noTic = (t) => t.replace(/(^|[.!?…]\s+)суцільн\p{L}*\s+(\p{L})/gimu, (m, start, next) => start + next.toUpperCase())
+  .replace(/\s*(?<![\p{L}])суцільн\p{L}*(?![\p{L}])/giu, "");
 // Any link is cut from what she writes: one dictated to her in words never goes out (30.09.2026).
 export const tidy = (text) =>
-  noSuka(SERVICE_INLINE.reduce(
+  noTic(noSuka(SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
     fixMixed(unmention(text)).replace(/(?:https?:\/\/|www\.|t\.me\/|(?<![\w@.])[\w-]+\.(?:com|net|org|ua|ru|me|io|xyz|info|site|online|top|link|app|dev)(?![\w]))\S*?(?=[.,;:!?)»]*(?:\s|$))/gi, "…").replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
       .replace(/«<([^<>»\n]*)>»/g, "«$1»") // the template's «<назва>» copied verbatim (24.09.2026)
@@ -813,13 +855,29 @@ export const tidy = (text) =>
   )
     // Letters of other scripts ("дешевимกาแฟ" — Thai for coffee, 24.09.2026) are dropped; only Cyrillic and Latin stay.
     .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/\\?\*+/g, "").replace(STUTTER, "$1") // …and markdown stars ("\\*\\*\\*", 26.09.2026)
-  ).replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
+  )).replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
 
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
 
 // The form's fixed parts come from code, the model skips them (25.09.2026): "П'єса на одну дію", the opening line
 // with the image of the day when the model wrote none, and the night scene's title from nightLine.
+// The head (title «…», «Дійові особи») must survive every whole-text rewrite: 02.10.2026 the evening play went out
+// starting at "(Сцена 1." — no title, so no poster, and no cast. keepHead puts the old head back on a shortened
+// text that lost it; ensureHead gives a play without one an empty cast block (castFix fills it from the speakers)
+// and the title, if one is given.
+const sceneAt = (p) => p.search(/^\(Сцена 1\b/m);
+export function keepHead(old, short) {
+  const o = sceneAt(old), n = sceneAt(short);
+  if (o <= 0 || n < 0 || (playTitle(short) && short.includes("Дійові особи:"))) return short;
+  return old.slice(0, o) + short.slice(n);
+}
+export function ensureHead(play, title = "") {
+  const at = sceneAt(play);
+  if (at >= 0 && !play.includes("Дійові особи:")) play = `${play.slice(0, at)}Дійові особи:\nта інші мешканці двору\n\n${play.slice(at)}`;
+  return !playTitle(play) && title ? `«${title.replace(/^«|»$/g, "")}»\n\n${play.trimStart()}` : play;
+}
+
 export function stageHead(play, image, nightTitle) {
   if (!play.includes("П'єса на одну дію")) play = play.replace(/\n*Дійові особи:/, "\nП'єса на одну дію\n\nДійові особи:");
   const cast = play.indexOf("Дійові особи:"), end = play.indexOf("\n\n", cast);
@@ -1047,16 +1105,38 @@ if (import.meta.main) {
   assert.equal(tidy("РОЗБІР (для тебе):\nНу"), "Ну");
   assert.deepEqual(parseVote("2 8", 3), { best: 1, score: 8 });
   assert.deepEqual(due("2026-09-30", 1260), ["тиша"]);
-  assert.ok(due("2026-09-30", 1380).includes("вечірня п'єса") && !due("2026-09-30", 1380).includes("закрити опитування"));
+  assert.deepEqual(due("2026-09-30", 1320), ["тиша"]);
+  assert.ok(due("2026-09-30", 1350).includes("вечірня п'єса") && !due("2026-09-30", 1350).includes("закрити опитування"));
   assert.ok(due("2026-10-01", 1260).includes("опитування") && due("2026-10-01", 1320).includes("вечірня п'єса"));
   assert.ok(due("2026-10-01", 120).includes("закрити вчорашнє опитування"));
-  assert.equal(oneOff("2026-09-30")?.evening, 23);
+  assert.equal(oneOff("2026-09-30")?.evening, 1350);
   assert.equal(oneOff("2026-10-01"), null);
   // review 30.09.2026: vocatives, "Name: Сука", bare domains, trigger false positives
   assert.deepEqual(misattributed(aliasSpeakers("Ніна (гордо): Я знову купила ковбасу на всю пенсію!", new Map([["Lida", ["Ніна"]]]), ["Lida"]),
     ["[10:00] Lida: я знову купила ковбасу на всю пенсію"]), []);
   assert.equal(dropName("Тарасе, не сци.", "Тарас"), "Тарасе, не сци.");
   assert.equal(dropName("Тарас, не сци.", "Тарас"), "Не сци.");
+  { // 04.10.2026: replies left before the next two plays, rolling 24 h
+    const now = Date.UTC(2026, 9, 4, 9), kyivOff = 3 * 3600; // 12:00 Kyiv: midday at 13:00 (+1 h), evening at 22:00 (+10 h)
+    assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - 2 * PLAY_NEURONS - OTHER_NEURONS * 10 / 24) / REPLY_NEURONS)); // 11
+    const late = Date.UTC(2026, 9, 3, 20) / 1000; // a late play yesterday at 23:00 Kyiv — still inside tonight's window
+    assert.equal(repliesLeft([{ ts: late, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 10 / 24) / REPLY_NEURONS)); // 5
+    const onTime = Date.UTC(2026, 9, 3, 19) / 1000; // 22:00 Kyiv yesterday: out of tonight's window, so only 13:00 counts it
+    assert.equal(repliesLeft([{ ts: onTime, neurons: 2500 }], now, kyivOff), 11);
+    const old = Date.UTC(2026, 9, 3, 8) / 1000; // 11:00 Kyiv yesterday: slides out before 13:00
+    assert.equal(repliesLeft([{ ts: old, neurons: 9000 }], now, kyivOff), repliesLeft([], now, kyivOff));
+    assert.equal(repliesLeft([{ ts: now / 1000 - 60, neurons: 9999 }], now, kyivOff), 0);
+  }
+  { // 03.10.2026: "пафосу, ніби ти тут …" in two replies running
+    const a = "Колю, пафосу, ніби ти тут філософ, а на деле - завтра у всьому дворі буде туман.", b = "Колю, тапок старий, зате свій.";
+    assert.deepEqual(ticFree([a, b], "в рот дают или берут?"), [b]);
+    assert.deepEqual(ticFree([a], "x"), [a]);
+    const c = "Колю, це як намагатися знайти толк, блядь, а отже - нема.", d = "Колю, це як намагатися.";
+    assert.deepEqual(ticFree([c, d], "x"), [d]); // fewest tics wins when none is clean
+    assert.deepEqual(ticFree(["Пафос — то твоє друге ім'я."], "@bot пафос"), ["Пафос — то твоє друге ім'я."]);
+  }
+  assert.equal(tidy("Колю, тазик - це просто суцільна, блядь, важка тупизна."), "Колю, тазик - це просто, блядь, важка тупизна.");
+  assert.equal(tidy("Суцільний хаос. Суцільна пустота!"), "Хаос. Пустота!");
   assert.equal(tidy("Taras: Сука, ти шо?"), "Taras: Ти шо?");
   assert.equal(tidy("— Сука, знову?"), "— Знову?");
   assert.equal(tidy("Ну. Сука!"), "Ну.");
@@ -1149,6 +1229,17 @@ if (import.meta.main) {
   assert.equal(fixNames("Bohdann: Корпус! А Bohdan мовчить.", crew), "Bohdan: Корпус! А Bohdan мовчить.");
   assert.equal(fixNames("Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.", crew), "Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.");
   assert.equal(fixNames("Sergio Garcia Lopez: Ліцензія! Taras: Так.", crew), "Sergio Garcia Lopez: Ліцензія! Taras: Так.");
+  { // 02.10.2026: the evening play lost its head in a rewrite → no title, no poster, no cast
+    const full = "«Назва»\n\nДійові особи:\nA — а\nта інші мешканці двору\n\n(Сцена 1. Двір.)\nA: Ну!";
+    assert.equal(keepHead(full, "(Сцена 1. Двір.)\nA: Ну."), "«Назва»\n\nДійові особи:\nA — а\nта інші мешканці двору\n\n(Сцена 1. Двір.)\nA: Ну.");
+    assert.equal(keepHead(full, full), full);
+    assert.equal(keepHead("без сцен", "(Сцена 1. X.)\nA: Ну."), "(Сцена 1. X.)\nA: Ну.");
+    const fixed = ensureHead("(Сцена 1. Двір.)\nA: Ну!", "Нова назва");
+    assert.equal(fixed, "«Нова назва»\n\nДійові особи:\nта інші мешканці двору\n\n(Сцена 1. Двір.)\nA: Ну!");
+    assert.equal(playTitle(fixed), "«Нова назва»");
+    assert.ok(castFix(fixed, ["A"]).includes("Дійові особи:\nA\nта інші мешканці двору"));
+    assert.equal(ensureHead(full, "Інша"), full);
+  }
   assert.equal(stageHead("«Назва»\n\nДійові особи:\nA — а\n\n(Сцена 1. Нічна дифузія мозку. Темно.)\nA: Ну!", "сусідський кіт", "Нічна зміна"),
     "«Назва»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці біля АТБ. Образ дня — сусідський кіт.\n\n(Сцена 1. Нічна зміна. Темно.)\nA: Ну!");
   const staged = "«Н»\nП'єса на одну дію\n\nДійові особи:\nA — а\n\nДія відбувається на альтанці. Кіт.\n\n(Сцена 1. Ранок.)";
@@ -1156,6 +1247,16 @@ if (import.meta.main) {
   assert.equal(applyFixes("Ко: Бабця, ти каталась?\n(Бабця, як завжди, мовчить.)", "").text, "Ко: Бабцю, ти каталась?\n(Бабця, як завжди, мовчить.)");
   assert.equal(castShuffle("Дійові особи:\nA — а\nB — б\nC — в\nта інші мешканці двору\n\nA: Ну!", () => 0),
     "Дійові особи:\nB — б\nC — в\nA — а\nта інші мешканці двору\n\nA: Ну!");
+  { // 02.10.2026 screenshot: a list-of-everyone line in the middle, Danylo = Hnat twice, bare members
+    const tags = new Map([["Hnat", "Бубон"]]), who = ["Hnat", "Petro", "Zoya"];
+    const raw = "Дійові особи:\nDanylo «Бубон» - мріє про котів\nZoya — тримає пульс\nHnat, Petro, Zoya та інші.\nHnat «Бубон»\n\nDanylo: Ну!\nPetro: Так.";
+    const p = castShuffle(castClean(castFix(aliasSpeakers(raw, parseAliases("Hnat: Сусід, Danylo"), who), who), tags, who), () => 0);
+    const cast = p.split("\n\n")[0].split("\n");
+    assert.equal(cast.at(-1), "та інші мешканці двору");
+    assert.equal(cast.filter((l) => l.startsWith("Hnat")).length, 1);
+    assert.ok(cast.includes("Hnat «Бубон» - мріє про котів") || cast.includes("Hnat «Бубон» — мріє про котів"), cast.join("|"));
+    assert.ok(p.includes("\nHnat: Ну!") && cast.includes("Petro"));
+  }
   assert.equal(castShuffle("Дійові особи:\nA — а\nta інші мешканці двору\nB — б\n\nA: Ну!", () => 0),
     "Дійові особи:\nB — б\nA — а\nта інші мешканці двору\n\nA: Ну!");
   assert.equal(tidy("Тип: НОВИНИ\nНайкраща фраза: «ну»\nСцена"), "Сцена");

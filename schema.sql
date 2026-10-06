@@ -38,12 +38,6 @@ CREATE TABLE IF NOT EXISTS pics (
   data TEXT
 );
 
--- Tag replies per Kyiv day: past REPLY_FULL_MAX a reply goes lean, so the plays keep their neurons.
-CREATE TABLE IF NOT EXISTS usage (
-  day TEXT PRIMARY KEY,
-  replies INTEGER NOT NULL
-);
-
 -- B: the yard's chronicle — running stories, memes, local words — rebuilt weekly from the week's plans on top of the
 -- previous one, so after a month she knows the chat. One row per rebuild; the newest is used.
 CREATE TABLE IF NOT EXISTS chronicle (
@@ -72,3 +66,10 @@ CREATE TABLE IF NOT EXISTS people (
   name TEXT PRIMARY KEY,
   uid INTEGER NOT NULL
 );
+
+-- Neurons per model call and picture (04.10.2026): the "(5)" after a reply sums the last 24 hours of this.
+CREATE TABLE IF NOT EXISTS spend (
+  ts INTEGER NOT NULL,
+  neurons REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS spend_ts ON spend (ts);
