@@ -33,7 +33,7 @@ const REDACTIONS = [
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]"],
 ];
 const SUSPECT_COMMENTARY = /[()]|тут |якщо |можна |або |проте |стилістично|граматично|контекстуально|помилки немає|мається на увазі|у значенні|залишаємо|краще так|варіант/i;
-const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже", кабачке: "кабачку", "в зенит": "в зеніті", "на деле": "на ділі" };
+const STATIC_FIXES = { воїтелька: "войовниця", голубамими: "голубами", летописка: "літописиця", Сінку: "Синку", сінку: "синку", жалікими: "жалюгідними", аотже: "а отже", Аотже: "А отже", кабачке: "кабачку", "в зенит": "в зеніті", "на деле": "на ділі", затея: "затія", затею: "затію", затеї: "затії" };
 // "Бабця, ти сьогодні…" — addressing her needs the vocative (25.09.2026). Only at the start of a line or a reply,
 // so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
 const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
@@ -190,7 +190,7 @@ export const grumbleSection = (minute, recent) =>
 export const RUDE_SHARE = 1 / 3;
 export const REPLY_TONES = {
   rude: "Тон грубий: відгавкайся, мат доречний, але спершу відповідь по суті, потім лайка.",
-  wise: "Тон філософський: відповідай по суті того, що написав автор, — з пафосом і абсурдом, як мудра бабця на лавці, що бачила все; без образ автора, мат щонайбільше одне слівце для колориту.",
+  wise: "Тон філософський: відповідай по суті того, що написав автор, — з урочистістю і абсурдом, як мудра бабця на лавці, що бачила все; без образ автора, мат щонайбільше одне слівце для колориту.",
 };
 export const REPLY_MOVES = {
   rude: [
@@ -211,7 +211,7 @@ export const REPLY_MOVES = {
     "Відповідай як бабця, яка зараз прочитає лекцію про суть сказаного.",
     "Відповідай вигаданою народною мудрістю чи приказкою, що несподівано пасує до сказаного.",
     "Зроби вигляд, що не почула, і відповідай про щось своє, бабцине, — але так, щоб це виявилось глибоким коментарем до сказаного.",
-    "Відповідай пафосним пророцтвом про двір, АТБ чи людство, що випливає зі сказаного.",
+    "Відповідай урочистим пророцтвом про двір, АТБ чи людство, що випливає зі сказаного.",
     "Порівняй сказане з рецептом: що туди кинути, скільки варити й чому все одно пригорить.",
     "Відповідай так, ніби пишеш некролог сказаному — урочисто й абсурдно.",
     "Зведи сказане до однієї дрібної побутової істини й подай її як відкриття століття.",
@@ -219,7 +219,7 @@ export const REPLY_MOVES = {
     "Почни з маминої науки й доведи її до абсурду.",
     "Дай пораду, як із цим жити далі, — корисну, але так, що смішно.",
     "Відповідай, ніби це питання до передачі «Здоров'я» чи «Поле чудес», і ведуча — ти.",
-    "Знайди у сказаному щось зворушливе й поплач над цим по-бабциному, з пафосом.",
+    "Знайди у сказаному щось зворушливе й поплач над цим по-бабциному, з урочистістю.",
     "Відповідай тостом за столом: піднімай чарку за сказане й несподівано заверши.",
     "Зроби зі сказаного прогноз погоди на завтра для всього двору.",
     "Відповідай листом до редакції газети «Вечірній Київ» 1987 року.",
@@ -287,12 +287,30 @@ export const genderLine = (names, set) => {
 // Lunch only 12:00–14:00 Kyiv (user's rule, 24.09.2026); outside it such a tag gets the general answer.
 // Hints name no concrete places or objects: the model copied "на акції в АТБ, у колясочній" into all 8 samples.
 const W = (stems) => new RegExp(`(?<![\\p{L}])(?:${stems})`, "iu");
+// "Продовжи вірш" (08.10.2026): an imperative verb of continuing and a noun about verse or song within two words of each
+// other — "продовжимо розмову" and "закінчи роботу" must not fire. "далі" alone is not a command (owner).
+const VERSE_VERB = "продовжи(?:ть)?|продовжуй(?:те)?|продовж(?![\\p{L}])|продолжи|продолжай|допиши(?:ть)?|дописуй(?:те)?|добий(?:те)?|добей|закінчи(?:ть)?|закінчуй(?:те)?|закончи|доверши(?:ть)?|дороби";
+// "рядок/рядки" alone is an everyday word ("допиши рядок коду"): it counts only as "рядки вірша/пісні…" or when the lines
+// follow on the next line ("доверши рядки:\n…").
+const VERSE_NOUN = "віршик|вірш|стишок|стишк|стих(?![\\p{L}])|стихи|куплет|строф|рядк\\p{L}*\\s+(?:вірш|пісн|стих|куплет)|рядк\\p{L}*(?=[^\\p{L}\\n]*\\n\\s*\\p{L})|пісн|песн|частушк|частівк";
+export const VERSE_CMD = W(`(?:${VERSE_VERB})[^\\p{L}]+(?:[\\p{L}']+[^\\p{L}]+){0,2}?(?:${VERSE_NOUN})`);
+// "Підбери риму до слова": a request for a rhyme — the word itself comes from rhymeTarget().
+const RHYME_NOUN = "рим[уаи](?![\\p{L}])|рифм[уаи]?(?![\\p{L}])";
+// "Рима" is also the city in the genitive ("дай квиток до Рима", "від Рима до Парижа"): a preposition right before the noun
+// rules a rhyme request out. (A bare "покажи мені Рима" still passes — the owner's chat has no way to tell it from "риму".)
+const NOT_AFTER_PREP = "(?<!(?:^|[^\\p{L}])(?:до|від|із|з|про|біля|на|в|у|під|над|без|за)\\s)";
+export const RHYME_CMD = W(`(?:підбер|підбир|знайд|придума|дай|скажи|покажи|шукай)[\\p{L}']*[^\\p{L}]+(?:[\\p{L}']+[^\\p{L}]+){0,2}?${NOT_AFTER_PREP}(?:${RHYME_NOUN})|зарифмуй|римуй|${NOT_AFTER_PREP}(?:${RHYME_NOUN})[^\\p{L}]+(?:до|на|для)(?![\\p{L}])`);
 // Every topic answers the question first: "розклади таро, чи виграє збірна України" got three stock cards about
 // the building, not a word about the team (25.09.2026). Hints carry no concrete examples — the model copies them.
 const REPLY_TOPICS = [
+  // "Продовжи вірш" (08.10.2026): the start comes from verseStart(); a missing start never reaches the model.
+  { key: "продовж", long: true, verse: true, temp: 1.0, re: VERSE_CMD,
+    hint: "Тема — продовження вірша чи пісні. Нижче в ПОЧАТКУ є чужі рядки: напиши ЛИШЕ продовження, 4–8 нових рядків, одразу після останнього рядка початку. Збережи римування, лад і того, до кого звертаються; рядки приблизно тієї ж довжини, що в початку. Рядки початку не повторюй і нічого не пояснюй. Далі по-подерв'янськи: серйозний тон раптом з'їжджає в гротеск і абсурд, суржик, а останній рядок — несподіваний вибух. Мату щонайбільше одне легке слівце. Без заголовка, лапок, вступу й коментаря після. Якщо початок — пісня чи частівка, тримай куплетну будову й повертайся до приспіву, повторюючи його рядки точно, якщо він є в початку." },
+  { key: "рима", verse: true, temp: 1.0, re: RHYME_CMD,
+    hint: "Тема — підбір рими до слова з дужок. Перший рядок: лише 4–6 справжніх українських слів-рим до нього через кому, без пояснень і без самого слова. Далі двовірш (2 рядки) у стилі Подерв'янського, де кінці рядків римуються: те слово і одна з перелічених рим. Мату щонайбільше одне легке слівце. Більше нічого." },
   // "дай рецепт оладків на молоці" got a joke about an old TV (25.09.2026): a request gets the real thing, in her voice.
   { key: "рецепт", long: true, re: W("рецепт|як приготув|як зварит|що приготув|шо приготув|що зварит|шо зварит|что приготов|что свари|як спект|як засол|як посол|як зробит|как пригот|как свар|как испеч|как засол|как сдела"),
-    hint: "Тема — рецепт: дай СПРАВЖНІЙ робочий рецепт того, що просять: інгредієнти з кількістю й 3–6 коротких кроків, рядками. По-бабциному — з бурчанням на початку й одним жартом наприкінці, але рецепт має бути правильний. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
+    hint: "Тема — рецепт: дай СПРАВЖНІЙ робочий рецепт того, що просять: інгредієнти з кількістю й 3–6 коротких кроків, рядками. По-бабциному — з бурчанням на початку й одним жартом наприкінці, але рецепт має бути правильний. Тон м'який, але в стилі Подерв'янського: урочистість на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
   // "розкажи анекдот" got a grumble about why jokes don't matter (30.09.2026): a request for a joke gets a real one —
   // set-up and a punchline in the last line; the form is picked by code so they don't repeat.
   { key: "анекдот", long: true, re: W("анекдот|анегдот|розкажи жарт|розкажи щось смішн|пожартуй|пошути|шутку(?![\\p{L}])|розсміш"),
@@ -306,7 +324,7 @@ const REPLY_TOPICS = [
   // 14 more formats (user, 30.09.2026: "штук 30, щоб була варіативність"). Narrow triggers, placed before the broad
   // "плітки" («розкажи…») and "порада" («підкажи…», «порадь…»), so each takes only its own requests.
   { key: "спір", re: W("розсуди|розсудіть|рассуди|рассудите|хто прав|кто прав|хто з нас прав|хто виграв суперечк|хто переміг у суперечц"),
-    hint: "Тема — суд бабці: розбери суперечку з розмови — позиція кожного одним рядком, потім вердикт: хто правий і чому, пафосно, як суддя на лавці. Переможця назви прямо." },
+    hint: "Тема — суд бабці: розбери суперечку з розмови — позиція кожного одним рядком, потім вердикт: хто правий і чому, урочисто, як суддя на лавці. Переможця назви прямо." },
   { key: "вибір", re: W("що краще|шо краще|что лучше|обери(?!\\s+карт)|вибери(?!\\s+карт)|выбери(?!\\s+карт)|що вибрати|шо вибрати|что выбрать"),
     hint: "Тема — вибір: першим словом назви, що бабця обирає з того, що запропонували, далі один-два рядки чому — з побутовим аргументом. Не ухиляйся й не кажи «обидва»." },
   { key: "кіно", long: true, re: W("що подивит|шо подивит|что посмотр|який фільм|який серіал|фільм на вечір|серіал на вечір|що почитат|шо почитат|что почитат|яку книжк|яку книгу|що пограт|у що пограт|во что поигр|яку гру(?![\\p{L}])"),
@@ -322,7 +340,7 @@ const REPLY_TOPICS = [
   { key: "прокляття", re: W("прокляни|прокляніть|прокльон|благослови|благословення|наврочи|пороблен|порчу"),
     hint: "Тема — народне прокляття чи благословення, як просять: 2–4 рядки урочисто, по-бабциному, з побутовими карами чи дарами — смішно, без справжньої злоби, здоров'я й смерті." },
   { key: "насвари", re: W("насвари|посвари|обізви|облай|вилай|нагримай|розбери по кісточк|приструнь"),
-    hint: "Тема — насвари: по-сусідськи насвари того, кого просять, за те, що він робить у розмові, — пафосно й смішно, без зовнішності, здоров'я й справжніх образ; наприкінці бабця все одно його жаліє." },
+    hint: "Тема — насвари: по-сусідськи насвари того, кого просять, за те, що він робить у розмові, — урочисто й смішно, без зовнішності, здоров'я й справжніх образ; наприкінці бабця все одно його жаліє." },
   { key: "комплімент", re: W("компліме|похвали(?![\\p{L}])|похваліть|похвалить|скажи щось приємне|скажи шось приємне|скажи что-то приятное"),
     hint: "Тема — комплімент: похвали того, кого просять, за те, чим він відомий у дворі й що робить у розмові, — щиро, по-бабциному, з одним смішним порівнянням." },
   { key: "слово", re: W("(?:що|шо) означає(?!\\s+(?:ц[еяі]й?|це|цей|ця|ці|для|то)(?![\\p{L}]))|что означает(?!\\s+(?:эт|для))|що значить слово|шо значить слово|что значит слово|поясни слово|розтлумач слово"),
@@ -336,12 +354,12 @@ const REPLY_TOPICS = [
   // Horoscopes and fortune-telling on request (25.09.2026): code picks the kind each time, so they don't repeat.
   // A verse, a toast, a greeting (for the addressee if it's a reply to someone) — a format, not a one-liner (26.09.2026).
   { key: "вірш", long: true, re: W("вірш|стишок|стишк|стихотвор|стих(?:и|ами)?(?![\\p{L}])|тост(?:а|ом|и)?(?![\\p{L}])|привіта|поздрав|з днем народж|с днем рожд|з днюх|с днюх|частушк|пісеньк|песенк"),
-    hint: "Тема — те, що просять: вірш (4–8 рядків у риму), тост (урочисто, з чаркою) чи привітання (побажання, спогад і добре прокляття-побажання наприкінці). Про того, кого чи що просять, пафосно, як на шкільній лінійці, з раптовим суржиком і влучним матом." },
+    hint: "Тема — те, що просять: вірш (4–8 рядків у риму), тост (урочисто, з чаркою) чи привітання (побажання, спогад і добре прокляття-побажання наприкінці). Про того, кого чи що просять, урочисто, як на шкільній лінійці, з раптовим суржиком і влучним матом." },
   // Dreams: "мені наснилось…", "розтлумач сон" (26.09.2026).
   { key: "сон", long: true, re: W("сонник|наснил|приснил|снилос|снився|снилас|сниться|розтлумач"),
-    hint: "Тема — сонник: розтлумач сон автора за бабциним сонником — кожен символ зі сну: що він означає, і наприкінці пафосне абсурдне пророцтво." },
+    hint: "Тема — сонник: розтлумач сон автора за бабциним сонником — кожен символ зі сну: що він означає, і наприкінці урочисте абсурдне пророцтво." },
   { key: "таро", long: true, re: W("таро|tarot"),
-    hint: "Тема — таро: розклади три карти з бабциної колоди на те, про що спитали. Карти вигадай щоразу нові, побутові й пов'язані з питанням (без карт із минулих відповідей); для кожної — що вона каже саме про це питання. Наприкінці — пряма відповідь на питання (так / ні / коли) і абсурдна порада. Пафосно, як справжня гадалка." },
+    hint: "Тема — таро: розклади три карти з бабциної колоди на те, про що спитали. Карти вигадай щоразу нові, побутові й пов'язані з питанням (без карт із минулих відповідей); для кожної — що вона каже саме про це питання. Наприкінці — пряма відповідь на питання (так / ні / коли) і абсурдна порада. Урочисто, як справжня гадалка." },
   { key: "гадання", long: true, re: W("погада|гадання|гадалк|поворож|ворож|кавов\\p{L}* гущ|по долон|на картах|розклад"),
     hint: [
       "Тема — гадання на кавовій гущі: що бабця побачила в чашці (три фігури з побуту) і що вони віщують.",
@@ -354,7 +372,7 @@ const REPLY_TOPICS = [
     hint: [
       "Тема — гороскоп на сьогодні: де застрягли планети (місце бери з теми порівняння, не з АТБ і не з колясочної) і чого остерігатись.",
       "Тема — гороскоп на тиждень: коротко по днях, від понеділка до неділі, у 4–7 рядків, абсурдно.",
-      "Тема — любовний гороскоп: що зірки кажуть про кохання автора — пафосно й без пошлості.",
+      "Тема — любовний гороскоп: що зірки кажуть про кохання автора — урочисто й без пошлості.",
       "Тема — фінансовий гороскоп: гроші, пенсія й акції в АТБ за розташуванням зірок.",
       "Тема — гороскоп для всього двору: кожному знаку по пів рядка, знаки вигадай сама — щоразу нові.",
     ] },
@@ -370,7 +388,7 @@ const REPLY_TOPICS = [
     hint: "Тема — здоров'я бабці: розкажи про свій тиск, коліна чи таблетки — як про подвиг. Про здоров'я автора не жартуй." },
   // Before "порада" and "плітки" ("порадуйте", "розкажи"): "розкажіть шось хороше" (25.09.2026) — Ukrainian and Russian: хороше/хорошее, приємне/приятное, порадуйте, втіште/утешьте…
   { key: "хороше", re: W("хорош|приємн|приятн|позитив|радіс|радост|порадуй|порадувати|порадовать|втіш|утеш|потіш|тепле|тепл[оеі]го|добре слово|доброе слово|(?:щось|шось|що-небудь|что-то|чтото|что-нибудь|шото) добр"),
-    hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном. Тон м'який, але в стилі Подерв'янського: пафос на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
+    hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном. Тон м'який, але в стилі Подерв'янського: урочистість на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
   // "тег + совет / порада / порекомендуй…" (25.09.2026): Ukrainian and Russian, a different kind of advice each time.
   // If they asked about something concrete, the advice is about exactly that.
   { key: "порада", re: W("порад|порекоменд|рекоменд|що робити|шо робити|як бути|підкаж|посовіту|совіту|совет|посовет|совєт|посовєт|присовєт|подскаж|что делать|шо делать|как быть|допоможи|помоги"),
@@ -378,13 +396,13 @@ const REPLY_TOPICS = [
       "Тема — порада: життєва порада з бабциного досвіду — корисна, але смішна. Якщо спитали про щось конкретне — саме про це.",
       "Тема — порада з побуту: справжня робоча хитрість (пляма, хліб, сусіди, комуналка — або те, про що спитали), з бурчанням.",
       "Тема — «три правила бабці»: три короткі пункти про те, що спитали (чи про життя взагалі), третій абсурдний.",
-      "Тема — порада, як у журналі «Робітниця» 1987 року: пафосно, канцеляритом, про те, що спитали.",
+      "Тема — порада, як у журналі «Робітниця» 1987 року: урочисто, канцеляритом, про те, що спитали.",
       "Тема — порада-притча: коротка історія з бабциного життя з мораллю наприкінці, що пасує до питання.",
     ] },
   { key: "плітки", re: W("пліт|новин|що нового|шо нового|розкажи|хто там"),
     hint: "Тема — плітки: переказуй «новини двору» загально й вигадано, без імен і реальних фактів про людей." },
   { key: "пророцтво", re: W("що буде|шо буде|завтра|передбач|пророк|майбутн"),
-    hint: "Тема — пророцтво: передбач авторові чи двору щось пафосне й абсурдне." },
+    hint: "Тема — пророцтво: передбач авторові чи двору щось урочисте й абсурдне." },
 ];
 // "@бабця + surname" — fixed answers, word for word as the user set them (24.09.2026); checked before topics and fire
 // wherever the name stands in the message. "порох" and "моль" are ordinary words too (gunpowder, moth), so they count
@@ -518,8 +536,10 @@ const WAR_FALLBACK = [
 // The rest came from her last 80 replies (03.10.2026, logs/said-last80.json): ", блядь, а отже" in 40, "це як намагатися"
 // in 38 — one frame "X — це як намагатися …: шуму, блядь, на …, а на виході / а толку — …, а отже — …". "а отже" was
 // asked for by reply.txt and the judge; that ask is gone. The drafts with the fewest tics go on to the judge.
+// 08.10.2026: the frame returned as "це така ж безглузда затея, як намагатися …" (2 of 2 replies after the lexicon deploy,
+// 1 of 83 before), which "це як намагат" missed — so the tic is the verb phrase alone.
 const TICS = [/(?<![\p{L}])пафос/iu, /ніби ти тут/iu, /на деле(?![\p{L}])/iu, /завтра\s+(?:на|у|в)\s+(?:весь|всьому|усьому|цілому|цілий)\s+двор/iu,
-  /(?<![\p{L}])а отже(?![\p{L}])/iu, /це як намагат/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu];
+  /(?<![\p{L}])а отже(?![\p{L}])/iu, /як намагат/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
 const ticCount = (d, asked) => TICS.filter((re) => re.test(d) && !re.test(asked)).length;
 export const ticFree = (drafts, asked) => {
   const least = Math.min(...drafts.map((d) => ticCount(d, asked)));
@@ -583,8 +603,11 @@ const leansOnTag = (desc, tag) => tag.toLowerCase().split(",").some((t) => {
 export function castClean(play, tags, names = []) {
   const real = new Map([...names, ...tags.keys()].map((n) => [nameKey(n), n]));
   // One line per member: "Danylo «Бубон»" and "Hnat «Бубон»" both stood in the cast (02.10.2026) — the described one stays.
+  // 07.10.2026: "Kit Kotsky, Bohdan, …, Ivan M, Бабця з альтанки." stood in the cast as one more line — a list of
+  // everybody with no description and no "та інші" for castShuffle to catch. Two or more real names split by commas = a list.
+  const isList = (l) => !l.match(CAST_LINE)[2] && !/[tт][aа]\s+інші/iu.test(l) && l.split(",").filter((p) => real.has(nameKey(p))).length >= 2;
   return editCast(play, (lines) => {
-    const out = lines.map((l) => {
+    const out = lines.filter((l) => !isList(l)).map((l) => {
       const name = real.get(nameKey(castName(l))), desc = l.match(CAST_LINE)[2];
       if (!name) return { l };
       const tag = tags.get(name), d = desc && !(tag && leansOnTag(desc, tag)) ? desc : "";
@@ -845,9 +868,182 @@ const noSuka = (t) => t.replace(/,\s*сук[аоу](?![\p{L}])/giu, "")
 // minus two, so the word goes in code; at a sentence start the next word takes the capital.
 const noTic = (t) => t.replace(/(^|[.!?…]\s+)суцільн\p{L}*\s+(\p{L})/gimu, (m, start, next) => start + next.toUpperCase())
   .replace(/\s*(?<![\p{L}])суцільн\p{L}*(?![\p{L}])/giu, "");
+// 07.10.2026 (screenshots evidence/replies/mandahuy-pafos-07-10.*): "мандахуйова" in four replies of one morning, an invented
+// word the prompts never contained — it spread through her own last replies; and "пафос" kept coming back. The owner banned
+// both outright, so code swaps them for plain words (same endings, so the grammar holds). Capital letter is kept.
+const SWAPS = [[/(?<![\p{L}])пафосн(\p{L}*)/giu, (m, e) => "урочист" + e], [/(?<![\p{L}])пафосом(?![\p{L}])/giu, () => "урочистістю"],
+  [/(?<![\p{L}])пафос[уі](?![\p{L}])/giu, () => "урочистості"], [/(?<![\p{L}])пафос(?![\p{L}])/giu, () => "урочистість"],
+  [/(?<![\p{L}])мандахуйов(\p{L}*)/giu, (m, e) => "хрінов" + e], [/(?<![\p{L}])мандахуй\p{L}*/giu, () => "хрін"]];
+const swapBanned = (t) => SWAPS.reduce((r, [re, to]) => r.replace(re, (...a) => {
+  const w = to(...a); return /^\p{Lu}/u.test(a[0]) ? w[0].toUpperCase() + w.slice(1) : w;
+}), t);
+// Abuse in Poderviansky's manner lives in prompts/curses.txt, one section per theme with word-start triggers. Code hands a
+// rude answer three: two from the theme the author's message touches (a second theme gives one), the rest from the general
+// section, never one she already used in her last replies — so the vocabulary rotates with the conversation instead of one
+// coinage becoming the next tic ("мандахуйова", 07.10.2026). Gender-neutral on purpose: any addressee fits.
+const shuffled = (a) => [...a].sort(() => Math.random() - 0.5);
+export const parseCurses = (txt) => {
+  const out = [];
+  for (const l of txt.split("\n").map((x) => x.trim())) {
+    if (l.startsWith("## ")) {
+      const [name, trig = ""] = l.slice(3).split("|").map((x) => x.trim());
+      const stems = trig.split(",").map((x) => x.trim()).filter(Boolean).map((x) => x.replace(/\$$/, "\u0000").replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace("\u0000", "(?![\\p{L}])")); // a trailing $ means the whole word ("друг$" is not "другий")
+      out.push({ name, re: stems.length ? new RegExp(`(?<![\\p{L}])(?:${stems.join("|")})`, "iu") : null, items: [] });
+    } else if (out.length && l && !l.startsWith("#")) out.at(-1).items.push(l);
+  }
+  return out;
+};
+const hitCache = new WeakMap(); // the 3 drafts of one reply ask the same texts: match a text's themes once, not per draft
+const themed = (sections, text) => {
+  let m = hitCache.get(sections);
+  if (!m) hitCache.set(sections, (m = new Map()));
+  if (!m.has(text)) { if (m.size >= 4) m.clear(); m.set(text, sections.filter((s) => s.re?.test(text))); }
+  return shuffled(m.get(text));
+};
+const norm = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, " ").trim();
+// n phrases from a base: the ask's theme first (n-1 of them, at least one), then one from each other theme the ask or the
+// conversation touches, the general section fills the rest; phrases already in her last replies are skipped.
+// `ctx` must be bare message bodies (see bodies()): names and group titles gave false theme hits (07.10.2026).
+export const pickFrom = (sections, asked = "", ctx = "", recent = "", n = 2) => {
+  const used = ` ${norm(recent)} `, picks = [];
+  // Matched as whole words with punctuation ignored ("Ото ж бо й воно," inside "Ото ж бо й воно шановний…"); a phrase
+  // shorter than 10 characters is never skipped, it would match any reply that happens to contain those words.
+  const seen = (c) => { const w = norm(c); return w.length >= 10 && used.includes(` ${w} `); };
+  const take = (s, k) => { // walk the shuffled section and stop at k: judging every item for repeats cost ~0.8 ms per hint
+    let got = 0;
+    for (const c of s ? shuffled(s.items) : []) {
+      if (picks.length >= n || got >= k) break;
+      if (!picks.includes(c) && !seen(c)) { picks.push(c); got++; }
+    }
+  };
+  const first = themed(sections, asked), rest = themed(sections, ctx).filter((s) => !first.includes(s));
+  take(first[0], Math.max(1, n - 1));
+  for (const s of [first[1], ...rest]) take(s, 1);
+  take(sections.find((s) => !s.re), n);
+  return picks;
+};
+export const cursesHint = (sections, asked = "", ctx = "", recent = "") =>
+  `Для лайки візьми щось із цього чи вигадай своє в тому ж дусі: ${pickFrom(sections, asked, ctx, recent, 3).map((c) => `«${c}»`).join(", ")}.`;
+// One conversation line per message, "Name: text". A multi-line message is folded onto its line, so bodies() can tell a new
+// message from a continuation (a continuation line has no "Name: " and was being dropped, or cut at its first ": ").
+export const contextLine = (name, text) => `${name}: ${text.replace(/\s*\n\s*/g, " ")}`;
+// Only the text of those lines may decide a theme — never a name or a group title.
+export const bodies = (context) => context.split("\n").map((l) => l.split(": ").slice(1).join(": ")).join("\n");
+const quoted = (a) => a.map((c) => `«${c}»`).join(", ");
+const NO_FRAME = ["рецепт", "анекдот", "вірш", "продовж", "рима"]; // these topics have their own form: no opener or closer
+// Colour for a tag reply: words, one opener or closer, a toast/curse only when the ask itself calls for one.
+export const lexHint = (bases, { asked = "", ctx = "", recent = "", topic = "" } = {}) => {
+  const parts = [], words = pickFrom(bases.lexicon, asked, ctx, recent, 2);
+  if (words.length) parts.push(`слова для колориту: ${quoted(words)}`);
+  if (!NO_FRAME.includes(topic)) {
+    const [label, base] = Math.random() < 0.5 ? ["зачин", bases.openers] : ["кінцівка", bases.closers], f = pickFrom(base, asked, ctx, recent, 1);
+    if (f.length) parts.push(`${label}: ${quoted(f)}`);
+  }
+  const wish = pickFrom(bases.blessings, asked, "", recent, 1);
+  if (wish.length) parts.push(`тост чи прокляття: ${quoted(wish)}`);
+  return parts.length ? `Для колориту (візьми одне-два чи вигадай своє в тому ж дусі, не всі підряд): ${parts.join("; ")}.` : "";
+};
+// The start of a verse to continue (08.10.2026): the tagged message's own text (after or before the command), else the
+// message it replies to, else her own line it replies to; the last 600 characters, whole lines. null = nothing to continue.
+const cutTail = (t, max = 600) => {
+  if (t.length <= max) return t;
+  let out = "";
+  for (const line of t.split("\n").reverse()) { const next = out ? `${line}\n${out}` : line; if (next.length > max) break; out = next; }
+  return out || t.slice(-max);
+};
+export const verseStart = (raw, other, botText) => {
+  const clean = raw.replace(/@\w+/g, " "), m = VERSE_CMD.exec(clean);
+  const ok = (t) => t.length >= 12 && t.split(/\s+/).length >= 2;
+  const tidyLines = (t) => t.replace(/\r/g, "").split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+  const after = m ? tidyLines(clean.slice(m.index + m[0].length).replace(/^[\s:;,.!?\-—–]+/, "")) : "";
+  const before = m ? tidyLines(clean.slice(0, m.index)) : tidyLines(clean);
+  const src = [after, before, tidyLines(other?.text ?? ""), tidyLines(botText ?? "")].find(ok);
+  return src ? cutTail(src) : null;
+};
+// A verse or rhyme request: its text may hold words of a fixed phrase ("рудий", a surname) that must not hijack it.
+export const isVerseCmd = (raw) => { const t = raw.replace(/@\w+/g, " "); return VERSE_CMD.test(t) || RHYME_CMD.test(t); };
+// Just the command ("продовж вірш") — the start is shown to the model once, in its own block, not again inside the ask.
+export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.[0] ?? raw;
+// What draft() appends to every hint. A verse topic has its own length and comparison rules: "до 12 рядків" and "одне
+// порівняння" would fight "4–8 рядків" and a rhymed punchline.
+export const replyTail = (topic, long) => topic?.verse ? "" : ` Щонайбільше одне порівняння, і лише з предмета питання чи розмови.${long ? " Тут можна довше — до 12 рядків." : ""}`;
+// Stock replies when there is nothing to ask the model about: a start, or a word to rhyme (0 neurons).
+export const NO_START = [
+  "А де початок? Я що, ясновидиця? Кинь рядки, тоді й допишу.",
+  "Дописувати нічого, а мудрість моя не безмежна. Кидай початок.",
+  "Спершу рядки, потім продовження. Така в нас черга, не я вигадала.",
+  "Без початку я лише зітхаю. Кинь хоч два рядки.",
+  "Що продовжувати, повітря? Рядки давай, тоді й заспіваємо.",
+  "Муза без початку не працює, вона в мене з характером. Кинь рядки.",
+  "Ой, бабця б продовжила, та нема що. Рядки в студію.",
+  "Продовжувати треба щось, а не нічого. Дай початок.",
+];
+export const NO_WORD = [
+  "До якого слова риму шукати? Скажи слово, а не мовчи.",
+  "Рими з повітря не ловлю. Дай слово, тоді й підберу.",
+  "Риму до чого? Кинь слово, бабця не ясновидиця.",
+  "Без слова рима не народжується. Давай слово.",
+  "Слово скажи, а не загадки загадуй. Тоді й римуватимемо.",
+];
+// What the model wrote after the start (08.10.2026): lines that repeat a start line go, at most 8 stay, fewer than 2 = a
+// failed draft (null).
+const normLine = (l) => l.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+// A refrain may come back (the hint asks a song to return to it): a start line labelled "Приспів…" or given twice in the
+// start stays when the model repeats it; any other repeated start line is the model echoing the start and goes.
+const REFRAIN = /^\s*(?:приспів|припев|рефрен|chorus)/i;
+export const verseTail = (start, out) => {
+  const rows = start.split("\n").map((l) => l.trim()).filter(Boolean), count = {};
+  for (const l of rows) count[normLine(l)] = (count[normLine(l)] || 0) + 1;
+  const had = new Set(rows.map(normLine)), refrain = new Set(rows.filter((l) => REFRAIN.test(l) || count[normLine(l)] > 1).map(normLine));
+  // Prose before the verse ("…, як намагатися …. Слухай далі:", live 08.10.2026) is not verse: a line ending in a colon or
+  // much longer than the start's longest line goes.
+  const cap = Math.max(90, Math.round(1.8 * Math.max(0, ...rows.map((l) => l.length))));
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l && !l.endsWith(":") && l.length <= cap && (!had.has(normLine(l)) || refrain.has(normLine(l)))).slice(0, 8);
+  return lines.length >= 2 ? lines.join("\n") : null;
+};
+// Rhyme by the last two letters (no stress information): "Марсель/газель", "дарма/нема". Deliberately not weaker (owner).
+const onlyLetters = (t) => t.toLowerCase().replace(/[^\p{L}]/gu, "");
+const lineEnd = (line) => (line.match(/[\p{L}'’-]+/gu) || []).at(-1) || "";
+export const rhymes = (a, b) => {
+  const x = onlyLetters(a), y = onlyLetters(b);
+  return x.length >= 3 && y.length >= 3 && x !== y && x.slice(-2) === y.slice(-2);
+};
+// Rhyming pairs among a draft's lines — couplets (AABB) or crossed (ABAB), the better of the two. Used as a preference
+// before the judge (like ticFree), never as a rejection: stress and slant rhymes slip past a letters check.
+export const rhymeScore = (text, start = "") => {
+  const ends = (t) => t.split("\n").map(lineEnd).filter(Boolean);
+  // neighbouring lines and lines one apart (AABB and ABAB alike); counted on start + draft minus the start's own pairs,
+  // so a draft that closes a rhyme the start left open beats one that only rhymes with itself
+  const pairs = (e) => e.reduce((n, w, i) => n + [1, 2].filter((d) => i + d < e.length && rhymes(w, e[i + d])).length, 0);
+  return pairs(ends(`${start}\n${text}`)) - pairs(ends(start));
+};
+export const rhymeFirst = (drafts, start = "") => {
+  const top = Math.max(...drafts.map((d) => rhymeScore(d, start)));
+  return drafts.filter((d) => rhymeScore(d, start) === top);
+};
+// The word to rhyme (08.10.2026): the first word after "риму / рифму / зарифмуй / римуй" ("до", "на", "слова" skipped).
+const NOT_A_WORD = new Set(["мені", "будь", "ласка", "слова", "слово", "слову", "якесь", "якийсь", "яку", "якусь"]);
+export const rhymeTarget = (raw) => {
+  // A quoted phrase ("добрий вечір") rhymes by its LAST word; unquoted, the first word after the command is the target.
+  const m = raw.replace(/@\w+/g, " ").match(/(?:рим[уаи]|рифм[уаи]?|зарифмуй|римуй)(?![\p{L}])[^\p{L}]*(?:(?:до|на|для|слова|слово|слову)\s+)*(?:[«"“]([^»"”\n]{2,40})[»"”]|([\p{L}'’-]{2,}))/iu);
+  const w = (m?.[1] ? m[1].trim().split(/\s+/).at(-1) : m?.[2])?.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+  return w && w.length >= 2 && !NOT_A_WORD.has(w.toLowerCase()) ? w : null;
+};
+// The model's answer for a rhyme request: line 1 is the words (only real rhymes stay, by the last two letters), then the
+// couplet. Fewer than two rhymes left or an incomplete couplet = a failed draft (null).
+export const rhymeTail = (target, out) => {
+  const [first = "", ...rest] = out.split("\n").map((l) => l.trim()).filter(Boolean);
+  const good = first.replace(/^[^:\n]{0,15}:\s*/, "").split(/[,;]/).map((w) => w.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "")).filter((w) => w && rhymes(target, w));
+  return good.length >= 2 && rest.length >= 2 ? [good.join(", "), ...rest.slice(0, 2)].join("\n") : null;
+};
+// Colour for a grumble: the chat right now (bodies, no names) picks the theme; words and one closer, no swearing.
+export const grumbleHint = (bases, chat = "", recent = "") => {
+  const got = [...pickFrom(bases.lexicon, "", chat, recent, 2), ...pickFrom(bases.closers, "", chat, recent, 1)];
+  return got.length ? `Слова для настрою (візьми одне чи вигадай своє в тому ж дусі, не всі підряд): ${quoted(got)}\n` : "";
+};
 // Any link is cut from what she writes: one dictated to her in words never goes out (30.09.2026).
 export const tidy = (text) =>
-  noTic(noSuka(SERVICE_INLINE.reduce(
+  swapBanned(noTic(noSuka(SERVICE_INLINE.reduce(
     (t, re) => t.replace(re, ""),
     fixMixed(unmention(text)).replace(/(?:https?:\/\/|www\.|t\.me\/|(?<![\w@.])[\w-]+\.(?:com|net|org|ua|ru|me|io|xyz|info|site|online|top|link|app|dev)(?![\w]))\S*?(?=[.,;:!?)»]*(?:\s|$))/gi, "…").replace(/\[(?:номер телефону|номер картки|email|посилання)\]/g, "…").replace(/«{2,}/g, "«").replace(/»{2,}/g, "»")
       .replace(/«<([^<>»\n]*)>»/g, "«$1»") // the template's «<назва>» copied verbatim (24.09.2026)
@@ -855,7 +1051,7 @@ export const tidy = (text) =>
   )
     // Letters of other scripts ("дешевимกาแฟ" — Thai for coffee, 24.09.2026) are dropped; only Cyrillic and Latin stay.
     .replace(/(?:(?![\p{Script=Cyrillic}\p{Script=Latin}])\p{L}\p{M}*)+/gu, "").replace(/\\?\*+/g, "").replace(STUTTER, "$1") // …and markdown stars ("\\*\\*\\*", 26.09.2026)
-  )).replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
+  ))).replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n");
 
 // She answers only to her @handle. Words («бабця», «бот»…), replies to her and /commands no longer call her (24.09.2026).
 export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test(text); // not /cmd@babtsya…
@@ -977,10 +1173,10 @@ if (import.meta.main) {
   assert.equal(stripHints("ПРИЙОМ: Синку Lida, не крути сюжетом.\nОБРАЗ: Твої побажання — як недосмажені пиріжки.", "турецький серіал о сьомій"), "Синку Lida, не крути сюжетом.\nТвої побажання — як недосмажені пиріжки.");
   assert.equal(stripHints("ПРИЙОМ: Згідно з регламентом двору, Lida, іди на хер!\nОБРАЗ: лавка біля під'їзду", "лавка біля під'їзду"), "Згідно з регламентом двору, Lida, іди на хер!");
   assert.ok(!finalize("ОБРАЗ ДНЯ: тонометр\nБабця з альтанки представляє\n\nтекст").includes("ОБРАЗ ДНЯ"));
-  const leaky = "ОБСЯГ: 45 повідомлень\nПЛАН ДНЯ:\nТЕМИ\nУчасники: Ivan M\nЧим закінчилось: нічим\n[14:05] Ivan M: сире\nДійові особи:\n<учасник> — <гротескна характеристика>\nZina (з пафосом): Корж мій! КОНФУЗ [фото] [переслав чуже повідомлення]\n(відповідь Ivan M) Я там був.\n(Сцена 2: корж)\nМораль: «Все мине».";
+  const leaky = "ОБСЯГ: 45 повідомлень\nПЛАН ДНЯ:\nТЕМИ\nУчасники: Ivan M\nЧим закінчилось: нічим\n[14:05] Ivan M: сире\nДійові особи:\n<учасник> — <гротескна характеристика>\nZina (з жаром): Корж мій! КОНФУЗ [фото] [переслав чуже повідомлення]\n(відповідь Ivan M) Я там був.\n(Сцена 2: корж)\nМораль: «Все мине».";
   const clean = finalize(leaky);
   for (const bad of ["ОБСЯГ", "ПЛАН ДНЯ", "ТЕМИ", "Учасники:", "Чим закінчилось", "[14:05]", "<учасник>", "КОНФУЗ", "[фото]", "[переслав", "(відповідь"]) assert.ok(!clean.includes(bad), bad);
-  for (const good of ["Дійові особи:", "Zina (з пафосом): Корж мій!", "Я там був.", "(Сцена 2: корж)", "Мораль: «Все мине»."]) assert.ok(clean.includes(good), good);
+  for (const good of ["Дійові особи:", "Zina (з жаром): Корж мій!", "Я там був.", "(Сцена 2: корж)", "Мораль: «Все мине»."]) assert.ok(clean.includes(good), good);
   assert.equal(stripHints("Lida пише: Синку, сядь.", ""), "Синку, сядь.");
   assert.equal(dropName("Ivan M, ще при Кучмі за такі слова викачували.", "Ivan M"), "Ще при Кучмі за такі слова викачували.");
   assert.equal(dropName("Згідно з регламентом двору, доводжу до відома, Lida, шо твій язик довгий!", "Lida"), "Згідно з регламентом двору, доводжу до відома, шо твій язик довгий!");
@@ -1060,6 +1256,7 @@ if (import.meta.main) {
   assert.equal(tidy("наче той кіт, що, що у шматочок, так, так, не не буде"), "наче той кіт, що у шматочок, так, так, не буде");
   assert.equal(tidy("був один, маеdеlkа така"), "був один, така");
   assert.equal(applyFixes("Сінку, плітки — як жук.", "").text, "Синку, плітки — як жук.");
+  assert.equal(applyFixes("Ця затея, таку затею й без затеї.", "").text, "Ця затія, таку затію й без затії."); // 08.10.2026
   const rcPlay = "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\nМораль: ні.";
   assert.equal(rollCall(rcPlay, ["Ivan M", "Iron Grey Owl, esquire", "Kit Kotsky", "Kit Kotsky"]),
     "Дійові особи:\nIvan M — месія\n\nIvan M: Два рази!\nIron Grey Owl: Так.\n\n(Також у дворі галасували: Kit Kotsky.)\n\nМораль: ні.");
@@ -1134,10 +1331,170 @@ if (import.meta.main) {
     const c = "Колю, це як намагатися знайти толк, блядь, а отже - нема.", d = "Колю, це як намагатися.";
     assert.deepEqual(ticFree([c, d], "x"), [d]); // fewest tics wins when none is clean
     assert.deepEqual(ticFree(["Пафос — то твоє друге ім'я."], "@bot пафос"), ["Пафос — то твоє друге ім'я."]);
+    const f1 = "Сусіде, це така ж марна і безглузда обізнаність, як намагатися порахувати копійки в дірявому чобітку.";
+    const f2 = "Сусіде, твоя вимога - це така ж урочиста затія, як намагатися вигулькнути гімн перед калькулятором.", f3 = "Сусіде, ціни в АТБ знають лише каси та їхні сни.";
+    assert.deepEqual(ticFree([f1, f3, f2], "що там з цінами в АТБ?"), [f3]); // the 08.10.2026 frame in two wordings loses to a clean draft
+    assert.deepEqual(ticFree([f1], "x"), [f1]);
+    assert.deepEqual(ticFree([f1, f3], "як намагатися порахувати?"), [f1, f3]); // the author's own words never count
   }
   assert.equal(tidy("Колю, тазик - це просто суцільна, блядь, важка тупизна."), "Колю, тазик - це просто, блядь, важка тупизна.");
   assert.equal(tidy("Суцільний хаос. Суцільна пустота!"), "Хаос. Пустота!");
   assert.equal(tidy("Taras: Сука, ти шо?"), "Taras: Ти шо?");
+  { // 07.10.2026: a comma list of everyone in the middle of the cast (no "та інші" at its end)
+    const who = ["Zina Kovalchuk", "Kit Kotsky", "Bohdan", "Lida", "Ivan M"];
+    const raw = "Дійові особи:\nZina Kovalchuk «Пиріжниця» - кричить про чоловіка\nKit Kotsky, Bohdan, Lida, Zina Kovalchuk, Ivan M, Бабця з альтанки.\nLida «ковбаска» - шепоче про дівчину\nKit Kotsky - благає про інтернет\nта інші мешканці двору\n\nLida: Ну.";
+    const cast = castClean(raw, new Map(), who);
+    assert.ok(!cast.includes("Bohdan, Lida") && cast.includes("Kit Kotsky — благає про інтернет") && cast.includes("та інші мешканці двору"));
+    assert.equal(castClean("Дійові особи:\nIron Grey Owl, esquire — філософ\n\nA: Ну.", new Map(), ["Iron Grey Owl, esquire"]).includes("Iron Grey Owl, esquire"), true);
+  }
+  { // 07.10.2026: the owner banned "пафос" and the coined "мандахуйова"; both are swapped by code, endings and capital kept
+    assert.equal(tidy("Колю, з пафосом і пафосно, пафосна затія, Пафос і пафосу мало."), "Колю, з урочистістю і урочисто, урочиста затія, Урочистість і урочистості мало.");
+    assert.equal(tidy("Мандахуйова затія, мандахуйовий дебіл, все мандахуйово, мандахуйство."), "Хрінова затія, хріновий дебіл, все хріново, хрін.");
+    assert.equal(tidy("Пафосний вигляд."), "Урочистий вигляд.");
+    assert.deepEqual(ticFree(["Колю, мандахуйова затія.", "Колю, затія."], "x"), ["Колю, затія."]);
+    const cs = parseCurses(readFileSync(new URL("../prompts/curses.txt", import.meta.url), "utf8")), all = cs.flatMap((c) => c.items);
+    assert.ok(cs.length >= 9 && cs.filter((c) => !c.re).length === 1 && cs.find((c) => !c.re).items.length >= 50 && all.length >= 120);
+    assert.equal(new Set(all.map((c) => c.toLowerCase())).size, all.length);
+    assert.ok(all.every((c) => !/сук|пафос|мандахуй|війн|фронт|терор|обстр|битв/i.test(c)));
+    const food = cs.find((c) => c.name.startsWith("їжа")).items, general = cs.find((c) => !c.re).items;
+    for (let i = 0; i < 20; i++) {
+      const h = cursesHint(cs, "що там з цінами в АТБ?", ""), got = [...h.matchAll(/«([^»]+)»/g)].map((m) => m[1]);
+      assert.equal(got.length, 3);
+      assert.ok(got.filter((c) => food.includes(c)).length >= 2, h); // the theme of the question leads
+      assert.ok(cursesHint(cs, "привіт", "").match(/«/g).length === 3 && [...cursesHint(cs, "привіт", "").matchAll(/«([^»]+)»/g)].every((m) => general.includes(m[1])));
+    }
+    const last3 = general.slice(-3), seen = general.slice(0, -3).join(" · "); // her last replies already used the rest
+    assert.deepEqual([...cursesHint(cs, "привіт", "", seen).matchAll(/«([^»]+)»/g)].map((m) => m[1]).sort(), [...last3].sort());
+    assert.ok(!/мандахуй|пафос/i.test(cursesHint(cs, "x", "")));
+  }
+  { // lexicon: pickFrom picks by the ask first, then by the conversation; names never count (07.10.2026)
+    const fake = parseCurses("## загальне\nг1\nг2\nг3\nг4\n## їжа | атб\nї1\nї2\nї3\n## дорога | тралік\nд1\nд2\nд3");
+    const pick = (a, c = "", r = "", n = 2) => pickFrom(fake, a, c, r, n);
+    const rep = parseCurses("## загальне\nперша думка бабці\nдруга думка бабці\nтретя думка бабці\nчетверта думка бабці");
+    for (let i = 0; i < 20; i++) {
+      assert.equal(pick("ціни в АТБ", "", "", 3).filter((x) => x.startsWith("ї")).length, 2); // the ask's theme leads
+      const mix = pick("ціни в АТБ", "їдемо на тралік");
+      assert.ok(mix.some((x) => x.startsWith("ї")) && mix.some((x) => x.startsWith("д")), mix.join()); // then the conversation's
+      assert.ok(pick("привіт", "їдемо на тралік").some((x) => x.startsWith("д")));
+      assert.ok(pick("привіт").every((x) => x.startsWith("г")) && pick("привіт").length === 2); // no theme → general
+      assert.deepEqual(pickFrom(rep, "привіт", "", "перша думка бабці, друга думка бабці. Третя думка бабці!", 2), ["четверта думка бабці"]); // her last replies are skipped
+      assert.ok(pick("привіт", bodies("Атб Тарас: привіт")).every((x) => x.startsWith("г"))); // a name is not a theme
+    }
+    assert.equal(bodies("Тарас: ціни в АТБ\nZina Kovalchuk: привіт: ще"), "ціни в АТБ\nпривіт: ще");
+    // a multi-line message stays one line and keeps all its text (a continuation used to vanish, "Увага: акція" lost "Увага")
+    const multi = contextLine("Тарас", "привіт\nціни в АТБ\nУвага: акція") + "\n" + contextLine("Оля", "ок");
+    assert.equal(multi.split("\n").length, 2);
+    assert.equal(bodies(multi), "привіт ціни в АТБ Увага: акція\nок");
+    assert.ok(pick("привіт", bodies(multi)).some((x) => x.startsWith("ї"))); // the theme in the 2nd line of a message still counts
+    // "$" = whole word: "друг$" is a friend, not "другий"; "ші$" is ШІ, not "шість"
+    const [stem] = parseCurses("## x | ші$, кіт, друг$\nа");
+    assert.ok(stem.re.test("ШІ дав") && stem.re.test("кіт") && stem.re.test("мій друг") && !stem.re.test("шість") && !stem.re.test("другий день") && !stem.re.test("друга"));
+    assert.deepEqual(pickFrom(parseCurses("## тост | тост\nт1\nт2"), "привіт", "", "", 1), []); // no general section → nothing
+    const bases = { lexicon: fake, openers: parseCurses("## загальне\nз1\nз2"), closers: parseCurses("## загальне\nк1\nк2"), blessings: parseCurses("## тост | тост\nт1\nт2") };
+    for (let i = 0; i < 20; i++) {
+      const h = lexHint(bases, { asked: "привіт", topic: "" });
+      assert.ok(/слова для колориту: «г\d», «г\d»/.test(h) && /(зачин: «з\d»|кінцівка: «к\d»)/.test(h) && !/тост чи/.test(h), h);
+      const v = lexHint(bases, { asked: "тост за сусідів", topic: "вірш" });
+      assert.ok(!/зачин|кінцівка/.test(v) && /тост чи прокляття: «т\d»/.test(v), v); // a poem keeps its own form
+      const g = grumbleHint(bases, "їдемо на тралік", "");
+      assert.ok(/«[гд]\d», «[гд]\d», «к\d»/.test(g) && !/«з\d»/.test(g), g); // grumbles: lexicon + closers only
+    }
+    const op = parseCurses("## загальне\nОто ж бо й воно,\nА ось і діло:\nОдне слово —");
+    assert.deepEqual(pickFrom(op, "x", "", "Ото ж бо й воно шановний, і так далі. А ось і діло\nтут", 3), ["Одне слово —"]); // punctuation does not hide a repeat
+    assert.equal(pickFrom(parseCurses("## загальне\nНу що,\nТак"), "x", "", "ну що, так", 2).length, 2); // too short to judge: never skipped
+    assert.equal(lexHint({ lexicon: [], openers: [], closers: [], blessings: [] }, { asked: "x" }), "");
+    assert.match(cursesHint(parseCurses("## загальне\nг1\nг2\nг3"), "x", ""), /^Для лайки візьми щось із цього чи вигадай своє в тому ж дусі: «г\d», «г\d», «г\d»\.$/);
+  }
+  // Shared checks for the lexicon files: size, no duplicates, no banned words, no shared skeleton.
+  const BANNED = /(?<![\p{L}])сук[аоуи]?(?![\p{L}])|пафос|мандахуй|війн|фронт|терор|обстр|битв/iu;
+  const checkBase = (file, { all, general = 0, themed = 0, minPerTheme = 5 }) => {
+    const secs = parseCurses(readFileSync(new URL(`../prompts/${file}`, import.meta.url), "utf8")), items = secs.flatMap((s) => s.items);
+    assert.ok(items.length >= all, `${file}: ${items.length} < ${all}`);
+    assert.equal(new Set(items.map((c) => c.toLowerCase())).size, items.length, `${file}: duplicates`);
+    assert.ok(items.every((c) => !BANNED.test(c) && c.length <= 110 && !/^#|[«»]/.test(c)), `${file}: banned word, too long or has «» (breaks the hint parser)`);
+    assert.equal(secs.filter((s) => !s.re).length, general ? 1 : 0, `${file}: general section`);
+    assert.ok((secs.find((s) => !s.re)?.items.length ?? 0) >= general, `${file}: general size`);
+    const th = secs.filter((s) => s.re);
+    assert.ok(th.length >= themed && th.every((s) => s.items.length >= minPerTheme), `${file}: themes`);
+    const starts = {}; // one skeleton in many items becomes a tic ("це як намагатися …", 03.10.2026)
+    for (const c of items) { const k = c.toLowerCase().split(/\s+/).slice(0, 2).join(" "); starts[k] = (starts[k] || 0) + 1; }
+    assert.ok(Object.values(starts).every((n) => n <= 5), `${file}: shared start ${Object.entries(starts).find(([, n]) => n > 5)}`);
+    for (const w of [/борщ/i, /лавк|лавц/i]) assert.ok(items.filter((c) => w.test(c)).length <= Math.max(4, Math.floor(items.length * 0.04)), `${file}: too many ${w}`); // one favourite image must not become a tic
+    // no single content word in many items, and no "X — то така Y" skeleton: either becomes the next tic
+    const STOP = new Set("щоб хай нехай тобі тебе який яка таке така такий але мов ото воно мене тому вже коли поки між для про над під при без від чим тільки лише навіть ніж ніби нема буде були було була тебе".split(" ")), freq = {};
+    for (const c of items) for (const w of new Set(c.toLowerCase().match(/[\p{L}']{5,}/gu) || [])) if (!STOP.has(w)) freq[w] = (freq[w] || 0) + 1;
+    const top = Object.entries(freq).find(([, n]) => n > Math.max(8, Math.round(items.length * 0.05)));
+    assert.ok(!top, `${file}: word in too many items ${top}`);
+    assert.ok(items.filter((c) => /то така|то такий|то таке/i.test(c)).length <= Math.round(items.length * 0.08), `${file}: too many "то така"`);
+    return secs;
+  };
+  checkBase("curses.txt", { all: 250, general: 50, themed: 11 });
+  checkBase("lexicon.txt", { all: 200, general: 50, themed: 9, minPerTheme: 10 });
+  checkBase("openers.txt", { all: 150, general: 60, themed: 6, minPerTheme: 8 });
+  checkBase("closers.txt", { all: 150, general: 60, themed: 6, minPerTheme: 8 });
+  checkBase("blessings.txt", { all: 150, general: 0, themed: 5, minPerTheme: 20 });
+  { // 08.10.2026: "продовжи вірш" and "підбери риму" are topics of their own, ahead of "вірш" and "пісня"
+    const key = (t) => topicFor(t, 12)?.key;
+    for (const t of ["продовжи вірш", "@бабця допиши мій куплет", "добий строфу", "закінчи пісню", "доверши рядки:\nОй у лузі червона калина", "допиши рядки вірша", "продовжи, будь ласка, вірш", "дописуй частівку", "продолжи стих"]) assert.equal(key(t), "продовж", t);
+    for (const t of ["підбери риму до сонце", "рима до слова бабця", "зарифмуй каша", "дай рифму до Марсель", "дай мені риму до сонце"]) assert.equal(key(t), "рима", t);
+    for (const t of ["продовжимо розмову", "закінчи роботу", "далі в лісі", "добий його", "підбери подарунок", "що за рима", "допиши рядок коду в таблиці", "закінчи цей рядок будь ласка", "продовжи рядки в акті", "закінчи рядки", "дай квиток до Рима", "відстань від Рима до Парижа"]) assert.ok(!["продовж", "рима"].includes(key(t)), t);
+    assert.equal(key("напиши вірш про дощ"), "вірш");
+    assert.equal(key("заспівай пісню"), "пісня");
+    assert.ok(["продовж", "рима"].every((k) => REPLY_TOPICS.find((t) => t.key === k)?.verse && REPLY_TOPICS.find((t) => t.key === k).temp === 1.0));
+    const fake = parseCurses("## загальне\nз1 слово\nз2 слово");
+    for (let i = 0; i < 20; i++) for (const topic of ["продовж", "рима"]) assert.ok(!/зачин|кінцівка/.test(lexHint({ lexicon: fake, openers: fake, closers: fake, blessings: [] }, { asked: "x", topic })));
+    // verseStart (08.10.2026): the start from the tagged message, else from the reply, else from her own line
+    const sample = "Знає вся Європа, Бердичів і Марсель,\nЩо худа корова не схожа на газель.\nТак що ви, дівчата, журитесь дарма,\nБо тільки на гадюках сала та й нема!";
+    assert.equal(verseStart(`@babtsya_z_altanky_bot продовж вірш:\n${sample}`, null, ""), sample);
+    assert.equal(verseStart(`${sample}\n@babtsya_z_altanky_bot продовжи вірш`, null, ""), sample); // the start before the command
+    assert.equal(verseStart("@babtsya_z_altanky_bot допиши куплет", { name: "Оля", text: sample }, ""), sample); // a reply to a member
+    assert.equal(verseStart("@babtsya_z_altanky_bot продовжуй пісню", null, sample), sample); // a reply to her own line
+    assert.equal(verseStart("@babtsya_z_altanky_bot продовж вірш", null, ""), null);
+    assert.equal(verseStart("@babtsya_z_altanky_bot продовж вірш", { name: "Оля", text: "ок" }, ""), null); // too short to be a start
+    assert.equal(verseStart("@babtsya_z_altanky_bot продовж вірш: Ой у лузі червона калина", { name: "Оля", text: sample }, ""), "Ой у лузі червона калина"); // the message's own start wins
+    const long = Array.from({ length: 40 }, (_, i) => `рядок номер ${i} вірша про двір`).join("\n"), cut = verseStart(`@bot продовж вірш:\n${long}`, null, "");
+    assert.ok(cut.length <= 600 && cut.endsWith("рядок номер 39 вірша про двір") && cut.split("\n").every((l) => /^рядок номер \d+ вірша про двір$/.test(l))); // the tail, whole lines
+    for (const p of [...NO_START, ...NO_WORD]) assert.ok(p.length >= 20 && p.length <= 120 && !BANNED.test(p) && !/[«»]/.test(p), p);
+    assert.ok(NO_START.length >= 6 && NO_WORD.length >= 4);
+    // verseTail / rhymes (08.10.2026): a repeated start line goes, the cap is 8 lines, rhyme is by the last two letters
+    assert.equal(verseTail(sample, "Знає вся Європа, Бердичів і Марсель,\nа тут нове перше,\nа тут нове друге!"), "а тут нове перше,\nа тут нове друге!");
+    assert.equal(verseTail(sample, "Лише один рядок"), null);
+    assert.equal(verseTail("x y", Array.from({ length: 12 }, (_, i) => `рядок ${i}`).join("\n")).split("\n").length, 8);
+    assert.ok(rhymes("Марсель", "газель") && rhymes("дарма", "нема") && !rhymes("Марсель", "стіл") && !rhymes("слово", "слово") && !rhymes("до", "то"));
+    assert.equal(rhymeScore(sample), 2); // Марсель/газель, дарма/нема
+    assert.equal(rhymeScore("перший рядок\nдруга ніч\nтретій вечір\nчетверта зима"), 0);
+    assert.equal(rhymeScore("Гуде вітер у полі,\nСидить бабця коло воріт,\nА вона не кричить від болі,\nБо в неї на зиму ліпший привіт."), 2); // crossed ABAB: полі/болі, воріт/привіт
+    const rhymed = "Бабця сходить в магазин,\nА там дорожчий мандарин,\nСусід питає: де ж ціни?\nБабця: хліб в мене чини!", dry = "Просто рядок один,\nІ другий без рими зовсім,\nТретій теж про щось,\nЧетвертий про інше.";
+    assert.deepEqual(rhymeFirst([dry, rhymed]), [rhymed]); // the draft with rhymes goes on to the judge
+    assert.deepEqual(rhymeFirst([]), []);
+    // review fixes (08.10.2026): refrain, "рядок"/"Рима", fixed surnames, suffixes, quoted phrase, rhymes with the start
+    assert.equal(verseTail("Приспів: ой гоп гоп\nКуплет перший про двір", "Куплет другий про кота\nПриспів: ой гоп гоп"), "Куплет другий про кота\nПриспів: ой гоп гоп"); // a labelled refrain may come back
+    assert.equal(verseTail("ой гоп гоп\nкуплет один\nой гоп гоп\nкуплет два", "куплет три про двір\nой гоп гоп\nкуплет чотири"), "куплет три про двір\nой гоп гоп\nкуплет чотири"); // so may one given twice
+    // the live reply of 08.10.2026: a preamble (with the tic in it, ending in a colon) glued before the verse
+    const pre = "Сусіде, твій вірш - це така ж велична і безнадійна істина, як намагатися вилікувати хворобу за допомогою молитви на порожній кошик. Слухай далі:\nХуда, як спиця, - то зрада,\nВ неї в животі лише вітер і жада.\nА повна жонка - то скарб і надія,\nБо в ній сало, як в бабці, - свята стихія!";
+    assert.equal(verseTail(sample, pre), "Худа, як спиця, - то зрада,\nВ неї в животі лише вітер і жада.\nА повна жонка - то скарб і надія,\nБо в ній сало, як в бабці, - свята стихія!");
+    assert.equal(verseTail(sample, "Ось продовження:\nперший рядок\nдругий рядок"), "перший рядок\nдругий рядок");
+    const askTxt = "@babtsya_z_altanky_bot продовж вірш: рудий кіт сидів\nна воротах";
+    assert.ok(fixedFor(askTxt) && isVerseCmd(askTxt)); // a word of a fixed phrase inside the verse must not hijack the request
+    assert.ok(isVerseCmd("підбери риму до сонце") && !isVerseCmd("@babtsya_z_altanky_bot що там Зеленський?") && !isVerseCmd("дай квиток до Рима"));
+    assert.equal(verseCommand(`@babtsya_z_altanky_bot продовж вірш:\n${sample}`), "продовж вірш");
+    assert.equal(verseCommand("привіт усім"), "привіт усім");
+    assert.equal(replyTail({ verse: true, long: true }, true), ""); // the verse hint is the only length rule
+    assert.ok(/одне порівняння/.test(replyTail(null, false)) && !/12 рядків/.test(replyTail(null, false)) && /12 рядків/.test(replyTail({ long: true }, true)));
+    assert.equal(rhymeTarget("підбери риму до «добрий вечір»"), "вечір"); // the last word of a phrase carries the rhyme
+    const open3 = "Ішла бабця по дорозі,\nНесла відра на возі,\nА назустріч їй кіт";
+    const closes = "Йому сказала: привіт,\nА він: давай обід,\nІ пішли удвох у світ,\nНа цей смачний обід", alone = "Бо хліб їй не потрібен\nІ нічого не питала\nА вона лише стояла\nІ дивилась на кіш";
+    assert.ok(rhymeScore(closes, open3) > rhymeScore(alone, open3)); // the draft that closes the start's open rhyme wins
+    assert.deepEqual(rhymeFirst([alone, closes], open3), [closes]);
+    // rhymeTarget / rhymeTail (08.10.2026)
+    for (const [t, w] of [["підбери риму до сонце", "сонце"], ["@бабця рима до слова бабця", "бабця"], ["зарифмуй каша", "каша"], ["дай рифму до «Марсель»", "Марсель"], ["підбери риму", null], ["підбери риму, будь ласка", null]]) assert.equal(rhymeTarget(t), w, t);
+    assert.equal(rhymeTail("Марсель", "газель, пастель, стіл, шинель\nЗнає вся Європа з-під Марсель,\nа корова не схожа на газель."), "газель, пастель, шинель\nЗнає вся Європа з-під Марсель,\nа корова не схожа на газель.");
+    assert.equal(rhymeTail("Марсель", "стіл, дім\nрядок один\nрядок два"), null); // no real rhyme left
+    assert.equal(rhymeTail("Марсель", "газель, пастель\nлише один рядок"), null); // the couplet is incomplete
+    assert.equal(rhymeTail("Марсель", "Рими: газель, пастель\nперший\nдругий"), "газель, пастель\nперший\nдругий"); // a label in front is dropped
+    const vj = readFileSync(new URL("../prompts/verse-judge.txt", import.meta.url), "utf8");
+    assert.ok(vj.length > 300 && /номер/.test(vj) && !BANNED.test(vj) && !/суцільн/.test(vj), "verse-judge.txt"); // no reply-only tic clause
+  }
   assert.equal(tidy("— Сука, знову?"), "— Знову?");
   assert.equal(tidy("Ну. Сука!"), "Ну.");
   assert.equal(tidy("Заходь на evil.com/x, синку."), "Заходь на …, синку.");
