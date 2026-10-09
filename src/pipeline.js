@@ -302,6 +302,28 @@ const NOT_AFTER_PREP = "(?<!(?:^|[^\\p{L}])(?:до|від|із|з|про|біл�
 export const RHYME_CMD = W(`(?:підбер|підбир|знайд|придума|дай|скажи|покажи|шукай)[\\p{L}']*[^\\p{L}]+(?:[\\p{L}']+[^\\p{L}]+){0,2}?${NOT_AFTER_PREP}(?:${RHYME_NOUN})|зарифмуй|римуй|${NOT_AFTER_PREP}(?:${RHYME_NOUN})[^\\p{L}]+(?:до|на|для)(?![\\p{L}])`);
 // Every topic answers the question first: "розклади таро, чи виграє збірна України" got three stock cards about
 // the building, not a word about the team (25.09.2026). Hints carry no concrete examples — the model copies them.
+// Russia and a strike both named anywhere in the text (lookaheads: order does not matter).
+// What every form of the "удар по РФ" hint shares: decide who hit whom, joy only at objects and the state, no war words.
+const STRIKE_CORE = "спершу з'ясуй за повідомленням, ХТО по кому вдарив. Якщо наші (Сили оборони, дрони) уразили Росію, її завод, склад, аеродром чи ППО — радій на повну, урочисто й гучно, як на свято. Якщо вдарили по Україні — не радій і не жартуй, скажи коротко й стримано. Радість лише про об'єкти, техніку й державу: ні слова про загиблих, цивільних чи національність. Воєнних слів (війна, фронт, обстріл, битва, терор) не вживай ні як метафору, ні для опису — кажи просто «долетіло», «горить», «спалахнуло». Деталі (місто, завод) бери з повідомлення, нічого не вигадуй.";
+const STRIKE_FORMS = [
+  "форма — тост: підніми чарку за те, що долетіло.",
+  "форма — вирок їхньому ППО: воно в тебе дірявіше за сито.",
+  "форма — прокляття заводові й державі, урочисте, на три ступені.",
+  "форма — новина дня, як її передає бабця на лавці: з придихом і подробицями з повідомлення.",
+  "форма — бабусине пророцтво: що тепер у них там не буде ні пального, ні спокою.",
+];
+// Ukrainian and Russian, plus the chat's slang for the other side ("рашка", "кацапи", "москалі", "орки"): these only switch
+// the topic on; the hint still keeps jokes off people and nationality.
+const RU_CITY = "омськ|омск|белгород|бєлгород|курськ|курск|брянськ|брянск|краснодар|новоросійськ|новороссийск|ростов|воронеж|саратов|татарстан|єлабуг|елабуг|москв|москов|кремл";
+const RU_WORD = "рф(?![\\p{L}])|росі|россі|російськ|российск|москал|рашк|рашист|кацап|русн|мордор|орк(?![\\p{L}])|орки|орків|орками|нпз|нафтопереробн|нефтеперераб|нафтобаз|нефтебаз";
+// Ukrainian places that make a strike "on us"; the genitive "України" is left out on purpose: "Сил Оборони України" sits in
+// every report of our own strikes.
+const UA_PLACE = "одеськ|одещин|одеса|одесі|одесу|одесс|київ|києв|киев|харків|харк|дніпр|днепр|запоріж|запорож|львів|львов|миколаїв|миколає|николаев|херсон|полтав|сумщин|сумськ|сумах|сумы|чернігів|чернігов|чернигов|черкас|вінниц|винниц|житомир|кропивниц|хмельниц|рівне|рівного|рівному|луцьк|тернопіл|тернопол|ужгород|кременчук|кривий ріг|кривому розі|кривого рога|краматорськ|слов'янськ|куп'янськ|покровськ|україну|україні|україною|украину|украине";
+const HIT = "приліт|прильот|прилет|прилёт|прилетіл|уразил|уражен|поражен|поцілил|влучан|влучил|попал|попадан|бпла|беспилотн|дрон|вибух|взрыв|горить|горять|горит|горят|палає|палають|пожеж|пожар|ппо|пво|удар|вдар|атакува|атаков|атаку|атак[аи](?![\\p{L}])|ракет|бавовн|бахн|бахк|хлопок|хлопнул|хлопнуло|знищил|знищен|уничтож|збил|збит|сбил|сбит|налет|наліт";
+const has = (words) => `(?=[\\s\\S]*(?<![\\p{L}])(?:${words}))`;
+const strikeRe = () => new RegExp(`^${has(`${RU_CITY}|${RU_WORD}`)}${has(HIT)}`, "iu");
+// A strike on Ukraine: a Ukrainian place and a hit, and no Russian city (then it is more likely ours hitting them).
+const hitUaRe = () => new RegExp(`^(?![\\s\\S]*(?<![\\p{L}])(?:${RU_CITY}))${has(UA_PLACE)}${has(HIT)}`, "iu");
 const REPLY_TOPICS = [
   // "Продовжи вірш" (08.10.2026): the start comes from verseStart(); a missing start never reaches the model.
   { key: "продовж", long: true, verse: true, temp: 1.0, re: VERSE_CMD,
@@ -386,6 +408,14 @@ const REPLY_TOPICS = [
     hint: "Тема — гроші й пенсія: побурчи про ціни, пенсію й комуналку — з одним абсурдним розрахунком." },
   { key: "здоров'я", re: W("тиск|лікар|таблет|здоров|болить|аптек|поліклін|хвор"),
     hint: "Тема — здоров'я бабці: розкажи про свій тиск, коліна чи таблетки — як про подвиг. Про здоров'я автора не жартуй." },
+  // A hit on Russia (owner, 08.10.2026): the tag, or the message it replies to, names Russia and a strike. One regex cannot tell
+  // who hit whom ("росія атакувала дронами"), so the hint makes the model decide first and stay silent about hits on Ukraine.
+  // A strike on Ukraine goes first (08.10.2026): "Росія атакувала дронами Одещину" names Russia too, and the first answer to it
+  // joked about the fire. plain = no lexicon, no tone, no comparison: a short sober reply.
+  { key: "удар по Україні", plain: true, temp: 0.7, re: hitUaRe(),
+    hint: "Тема — удар по Україні: відповідь — НЕ БІЛЬШЕ ДВОХ коротких речень. Жодних жартів, порівнянь, образів, лайки й прокльонів: це наше лихо. Одне речення — співчуття своїми словами (на кшталт «Ой лихо, бережіть себе»), друге, якщо треба, — суть із повідомлення. Без зловтіхи, без слів про зраду, без воєнних слів (війна, фронт, обстріл, битва, терор), без вигаданих деталей, імен і цифр — лише те, що є в повідомленні. Не називай винних, не лютуй." },
+  { key: "удар по РФ", re: strikeRe(),
+    hint: STRIKE_FORMS.map((form) => `Тема — удар по Росії: ${STRIKE_CORE} ${form}`) },
   // Before "порада" and "плітки" ("порадуйте", "розкажи"): "розкажіть шось хороше" (25.09.2026) — Ukrainian and Russian: хороше/хорошее, приємне/приятное, порадуйте, втіште/утешьте…
   { key: "хороше", re: W("хорош|приємн|приятн|позитив|радіс|радост|порадуй|порадувати|порадовать|втіш|утеш|потіш|тепле|тепл[оеі]го|добре слово|доброе слово|(?:щось|шось|що-небудь|что-то|чтото|что-нибудь|шото) добр"),
     hint: "Тема — щось хороше: розкажи коротку теплу історію з двору чи зі свого життя, або світлу дрібницю, що може потішити, — без політики й війни. Бабця бурчить для порядку, але серце в неї добре: автора не лай, закінчи несподіваним теплим панчлайном. Тон м'який, але в стилі Подерв'янського: урочистість на рівному місці, суржик, легкі беззлобні підколки («ледащо», «руки-гачки», «недоварена моя»), мату — щонайбільше одне легке слівце, без справжніх образ." },
@@ -441,6 +471,16 @@ export const fixedIsBare = (text) => {
 
 export const topicFor = (text, hour) =>
   REPLY_TOPICS.find((t) => (t.from == null || (hour >= t.from && hour < t.to)) && t.re.test(text.replace(/@\w+/g, ""))) || null;
+// The tag alone says nothing ("@бабця шо скажеш" under a news post): the replied-to message or the forwarded post can carry
+// the topic. Only this one topic reads them; any other keeps to the tag's own words.
+const STRIKES = REPLY_TOPICS.filter((t) => t.key === "удар по Україні" || t.key === "удар по РФ");
+export const strikeFor = (...texts) => { const t = texts.filter(Boolean).join("\n"); return STRIKES.find((s) => s.re.test(t)) ?? null; };
+// The tag's own topic wins ("порадь", "вірш"); with none, or only "плітки" ("розкажи про це", "що нового?"), a strike in the
+// replied-to message or forwarded post decides.
+export const replyTopic = (raw, hour, ...replied) => {
+  const own = topicFor(raw, hour);
+  return !own || own.key === "плітки" ? strikeFor(...replied) ?? own : own;
+};
 
 // Real tags for "say": each known name becomes a text_mention (it notifies without a @username). Offsets are
 // UTF-16 units, which is what JS string length counts.
@@ -930,7 +970,7 @@ export const contextLine = (name, text) => `${name}: ${text.replace(/\s*\n\s*/g,
 // Only the text of those lines may decide a theme — never a name or a group title.
 export const bodies = (context) => context.split("\n").map((l) => l.split(": ").slice(1).join(": ")).join("\n");
 const quoted = (a) => a.map((c) => `«${c}»`).join(", ");
-const NO_FRAME = ["рецепт", "анекдот", "вірш", "продовж", "рима"]; // these topics have their own form: no opener or closer
+const NO_FRAME = ["рецепт", "анекдот", "вірш", "продовж", "рима", "порада"]; // no opener or closer: most of these topics have their own form; "порада" must answer the question itself, a copied opener hijacked it (08.10.2026)
 // Colour for a tag reply: words, one opener or closer, a toast/curse only when the ask itself calls for one.
 export const lexHint = (bases, { asked = "", ctx = "", recent = "", topic = "" } = {}) => {
   const parts = [], words = pickFrom(bases.lexicon, asked, ctx, recent, 2);
@@ -962,11 +1002,39 @@ export const verseStart = (raw, other, botText) => {
 };
 // A verse or rhyme request: its text may hold words of a fixed phrase ("рудий", a surname) that must not hijack it.
 export const isVerseCmd = (raw) => { const t = raw.replace(/@\w+/g, " "); return VERSE_CMD.test(t) || RHYME_CMD.test(t); };
+// "@бабця намалюй Хропіллу картинкою" (09.10.2026): a request for a picture never goes through the text chain.
+// Imperatives only ("малює" in a story is not a command); the subject is what follows the verb, or the noun in "дай картинку X".
+const CYR = "а-яіїєґё'’";
+const DRAW_NOUN = "(?:картинк|малюн|зображенн|рисун|изображен|ілюстрац|иллюстрац)[" + CYR + "]*|арт(?![" + CYR + "])";
+const DRAW_CMD = new RegExp("(?<![" + CYR + "])(?:"
+  + "(?:на|з)?малю(?:й|йте|вати)|(?:на|з)малю(?:єш|єте)"                       // малюй, намалюй, змалюй, намалювати, намалюєш
+  + "|(?:на|за)?рису(?:й|йте)|(?:на|за)рису(?:єш|єте|ешь|ете)|(?:на|за)?рисовать"  // рисуй, нарисуй, нарисуйте, нарисуешь, нарисовать
+  + "|накида(?:й|йте)|зобрази(?:ти)?|изобрази(?:ть|те)?"            // накидай, зобрази, изобрази
+  + "|(?:з|с)генер[" + CYR + "]*\\s+(?:мені\\s+|мне\\s+)?(?:" + DRAW_NOUN + ")"  // згенеруй / сгенерируй картинку
+  + "|(?:зроби|сделай|дай|видай|выдай|давай|покажи|кинь|скинь|створи|создай)\\s+(?:мені\\s+|мне\\s+|нам\\s+)?(?:[" + CYR + "]+\\s+)?(?:" + DRAW_NOUN + ")"
+  + ")", "iu");
+export const isDrawCmd = (raw) => DRAW_CMD.test(raw.replace(/@\w+/g, " "));
+export const drawSubject = (raw) => {
+  const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean);
+  if (!m) return "";
+  const rest = (clean.slice(0, m.index) + " " + clean.slice(m.index + m[0].length))
+    .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
+  return rest.replace(/\s+/g, " ").replace(/^[\s:;,.!?\-—–]+|[\s:;,.!?\-—–]+$/g, "").slice(0, 200);
+};
+export const NO_PAINT = [
+  "Фарби на сьогодні скінчились, пензлик висох. Проси завтра, бабця ще й не таке намалює.",
+  "Бабця сьогодні вже намалювала все, шо могла. Завтра приходь із олівцем.",
+];
+export const REFUSE_PAINT = [
+  "Такого бабця не малює - проси шось пристойне, а то пензлик відвернеться.",
+  "Ні, оце малювати не буду. Придумай шось людське.",
+];
+export const PAINT_CAPS = ["Ось, малювала на колінці - не вередуй.", "Тримай шедевр, пензлик ще мокрий.", "Намалювала, як побачила. Не подобається - дивись у вікно."];
 // Just the command ("продовж вірш") — the start is shown to the model once, in its own block, not again inside the ask.
 export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.[0] ?? raw;
 // What draft() appends to every hint. A verse topic has its own length and comparison rules: "до 12 рядків" and "одне
 // порівняння" would fight "4–8 рядків" and a rhymed punchline.
-export const replyTail = (topic, long) => topic?.verse ? "" : ` Щонайбільше одне порівняння, і лише з предмета питання чи розмови.${long ? " Тут можна довше — до 12 рядків." : ""}`;
+export const replyTail = (topic, long) => topic?.verse || topic?.plain ? "" : ` Щонайбільше одне порівняння, і лише з предмета питання чи розмови.${long ? " Тут можна довше — до 12 рядків." : ""}`;
 // Stock replies when there is nothing to ask the model about: a start, or a word to rhyme (0 neurons).
 export const NO_START = [
   "А де початок? Я що, ясновидиця? Кинь рядки, тоді й допишу.",
@@ -1038,7 +1106,9 @@ export const rhymeTail = (target, out) => {
 };
 // Colour for a grumble: the chat right now (bodies, no names) picks the theme; words and one closer, no swearing.
 export const grumbleHint = (bases, chat = "", recent = "") => {
-  const got = [...pickFrom(bases.lexicon, "", chat, recent, 2), ...pickFrom(bases.closers, "", chat, recent, 1)];
+  // 09.10.2026 (user): the grumble draws on all the bases — words, an opener or a closer, and a wish when the chat calls for one.
+  const frame = pickFrom(Math.random() < 0.5 ? bases.openers : bases.closers, "", chat, recent, 1), wish = pickFrom(bases.blessings, chat, "", recent, 1);
+  const got = [...pickFrom(bases.lexicon, "", chat, recent, 2), ...frame, ...wish];
   return got.length ? `Слова для настрою (візьми одне чи вигадай своє в тому ж дусі, не всі підряд): ${quoted(got)}\n` : "";
 };
 // Any link is cut from what she writes: one dictated to her in words never goes out (30.09.2026).
@@ -1250,6 +1320,48 @@ if (import.meta.main) {
   assert.ok(REPLY_TOPICS.every((t) => ![].concat(t.hint).some((h) => /Сусід з перфоратором|Туз комуналки|Королева черги|Лавковий Козеріг/.test(h))));
   assert.ok(REPLY_TOPICS.filter((t) => ["рецепт", "хороше"].includes(t.key)).every((t) => t.hint.includes("легкі беззлобні підколки")));
   assert.equal(topicFor("@babtsya_z_altanky_bot ну шо скажеш", 10), null);
+  { // 08.10.2026: a hit on Russia — in the tag's own text, or in the message it replies to / the forwarded post
+    const omsk = "Все таки вдалося прорвати російське ППО в Омську. Ударні БПЛА Сил Оборони уразили Омський НПЗ, найбільший нафтопереробний завод рф.";
+    assert.equal(topicFor(`@babtsya_z_altanky_bot ${omsk}`, 10)?.key, "удар по РФ");
+    assert.equal(topicFor("@babtsya_z_altanky_bot ну шо скажеш", 10), null); // the tag alone
+    assert.equal(strikeFor(omsk)?.key, "удар по РФ");
+    assert.equal(strikeFor(undefined, `«Оперативний ЗСУ»: «${omsk}»`)?.key, "удар по РФ");
+    assert.equal(strikeFor("Прильоти по Росії, горить нафтобаза")?.key, "удар по РФ");
+    assert.equal(strikeFor("Вчора їздили в Москву на потязі"), null); // Russia, no strike
+    assert.equal(strikeFor("Дрон у мене над двором літає", "купив собі на ринку"), null); // a strike word, no Russia
+    assert.equal(strikeFor(), null);
+    // both languages and the chat's slang for the other side
+    for (const t of ["Бавовна в Росії, горить нафтобаза", "Рашка отримала прильоти по аеродрому", "Кацапи кричать: приліт у Бєлгороді", "Москалі сидять без світла після удару дронів",
+      "Орки втратили склад: вибух у Курську", "В России прилёт по нефтебазе, беспилотники над Москвой", "Российское ПВО не сбило дроны над Брянском", "Кацапы визжат, у них взрыв в Ростове"])
+      assert.equal(strikeFor(t)?.key, "удар по РФ", t);
+    for (const t of ["Москва стоїть на річці", "Рашка — це смішне слово", "Орки в Гобіті жахливі", "В России дождь", "Оркестр грає на площі, удар в барабан"])
+      assert.equal(strikeFor(t), null, t);
+    // 08.10.2026: a strike on Ukraine is its own sober topic; a text naming a Russian city is more likely ours hitting them
+    const key = (t) => strikeFor(t)?.key;
+    for (const t of ["Росія вночі атакувала дронами Одещину, є приліт по складу, пожежа.", "Росія вдарила по Харкову", "Вибухи в Києві, ППО працює", "Россия ударила по Днепру ракетами",
+      "Приліт у Запоріжжі, горить склад", "Дрони над Сумщиною, є пожежа", "Росія атакувала Україну дронами"])
+      assert.equal(key(t), "удар по Україні", t);
+    assert.equal(key(omsk), "удар по РФ"); // "Сил Оборони України" must not count as Ukrainian ground
+    assert.equal(key("Наші дрони уразили склад у Бєлгороді, у відповідь прилетіло по Харкову"), "удар по РФ"); // both: the model decides
+    assert.equal(key("Куплю квартиру в Одесі, тихо там") ?? null, null); // a place, no strike
+    const ua = strikeFor("Росія атакувала дронами Одещину, приліт, пожежа");
+    assert.ok(ua.plain && typeof ua.hint === "string" && ua.temp < 1, "plain: one sober hint, low temperature");
+    assert.ok(/НЕ БІЛЬШЕ ДВОХ/.test(ua.hint) && /Жодних жартів, порівнянь/.test(ua.hint) && /війна, фронт, обстріл, битва, терор/.test(ua.hint), "hint keeps its three rules");
+    assert.equal(replyTail(ua, false), ""); // no "one comparison" rule on top of "no comparisons"
+    assert.equal(replyTopic("@babtsya_z_altanky_bot шо скажеш стара?", 15, "Росія атакувала дронами Одещину, приліт")?.key, "удар по Україні");
+    // the tag as the owner writes it, under the news post (reply text or forwarded post)
+    const under = `«Оперативний ЗСУ»: «${omsk}»`;
+    for (const q of ["шо скажеш стара?", "шо скажеш, стара", "стара, шо скажеш", "бабуля шо скажеш", "що думаєш про це", "бабка, коментуй", "прокоментуй", "що там стара", "бабцю, оціни", "розкажи про це", "що нового?"]) {
+      assert.equal(replyTopic(`@babtsya_z_altanky_bot ${q}`, 15, omsk)?.key, "удар по РФ", q);
+      assert.equal(replyTopic(`@babtsya_z_altanky_bot ${q}`, 15, undefined, under)?.key, "удар по РФ", q);
+      assert.equal(replyTopic(`@babtsya_z_altanky_bot ${q}`, 15, "Привіт, як справи?"), topicFor(`@babtsya_z_altanky_bot ${q}`, 15), q); // no strike, no change
+    }
+    assert.equal(replyTopic("@babtsya_z_altanky_bot порадь шось", 15, omsk)?.key, "порада"); // an explicit command keeps its topic
+    assert.equal(replyTopic("@babtsya_z_altanky_bot напиши вірш", 15, omsk)?.key, "вірш");
+    assert.notEqual(topicFor("@babtsya_z_altanky_bot напиши вірш про дрони над Росією", 10)?.key, "удар по РФ"); // a verse stays a verse
+    const hint = [].concat(strikeFor(omsk).hint).join(" ");
+    assert.ok(/війна, фронт, обстріл, битва, терор/.test(hint) && /по Україні/.test(hint), "hint keeps the war-word ban and the direction check");
+  }
   assert.ok(REPLY_TOPICS.every((t) => !/у колясочній|на акції в АТБ\)/.test(t.hint)));
   assert.ok(REPLY_MOVES.rude.length >= 10 && REPLY_MOVES.wise.length >= 20 && IMAGES.length >= 50);
   assert.equal(tidy("всю душу обісрaли своїми новинами, Ivan M"), "всю душу обісрали своїми новинами, Ivan M");
@@ -1389,6 +1501,9 @@ if (import.meta.main) {
     // "$" = whole word: "друг$" is a friend, not "другий"; "ші$" is ШІ, not "шість"
     const [stem] = parseCurses("## x | ші$, кіт, друг$\nа");
     assert.ok(stem.re.test("ШІ дав") && stem.re.test("кіт") && stem.re.test("мій друг") && !stem.re.test("шість") && !stem.re.test("другий день") && !stem.re.test("друга"));
+    // 08.10.2026: "склад" in a trigger list matched "складно", "складається" and pulled "Склад — то така шафа" into an advice reply
+    const [work] = parseCurses("## робота й гроші | банк, склад$\nа");
+    assert.ok(work.re.test("а склад зачинено") && !work.re.test("то складно") && !work.re.test("все складається"));
     assert.deepEqual(pickFrom(parseCurses("## тост | тост\nт1\nт2"), "привіт", "", "", 1), []); // no general section → nothing
     const bases = { lexicon: fake, openers: parseCurses("## загальне\nз1\nз2"), closers: parseCurses("## загальне\nк1\nк2"), blessings: parseCurses("## тост | тост\nт1\nт2") };
     for (let i = 0; i < 20; i++) {
@@ -1396,8 +1511,10 @@ if (import.meta.main) {
       assert.ok(/слова для колориту: «г\d», «г\d»/.test(h) && /(зачин: «з\d»|кінцівка: «к\d»)/.test(h) && !/тост чи/.test(h), h);
       const v = lexHint(bases, { asked: "тост за сусідів", topic: "вірш" });
       assert.ok(!/зачин|кінцівка/.test(v) && /тост чи прокляття: «т\d»/.test(v), v); // a poem keeps its own form
+      assert.ok(!/зачин|кінцівка/.test(lexHint(bases, { asked: "порадь", topic: "порада" }))); // advice answers the question, no opener to copy
       const g = grumbleHint(bases, "їдемо на тралік", "");
-      assert.ok(/«[гд]\d», «[гд]\d», «к\d»/.test(g) && !/«з\d»/.test(g), g); // grumbles: lexicon + closers only
+      assert.ok(/«[гд]\d», «[гд]\d», «[зк]\d»/.test(g) && !/«т\d»/.test(g), g); // grumbles: lexicon + an opener or a closer; a wish only when the chat has its trigger
+      assert.ok(/«т\d»/.test(grumbleHint(bases, "тост за сусідів", "")), "grumble with a toast in chat");
     }
     const op = parseCurses("## загальне\nОто ж бо й воно,\nА ось і діло:\nОдне слово —");
     assert.deepEqual(pickFrom(op, "x", "", "Ото ж бо й воно шановний, і так далі. А ось і діло\nтут", 3), ["Одне слово —"]); // punctuation does not hide a repeat
@@ -1633,5 +1750,14 @@ if (import.meta.main) {
   assert.ok(finalize("Zina Kovalchuk — Пиріжниця, «Ой, мля» і ще щось: п'єса ґанок їжак").includes("Zina Kovalchuk — Пиріжниця, «Ой, мля» і ще щось: п'єса ґанок їжак"));
   assert.equal(warFallback("Це терор! Боротьба з терором. Паркувальна війна.", ""), "Це свавілля! Боротьба з свавіллям. Паркувальна колотнеча.");
   assert.equal(warFallback("про війну", "хтось писав про війну"), "про війну"); // members' own words stay
+  assert.ok(isDrawCmd("@babtsya_z_altanky_bot намалюй хропіллу картинкою") && isDrawCmd("бабця, нарисуй кота") && isDrawCmd("@babtsya_z_altanky_bot дай мені картинку трактора") && isDrawCmd("згенеруй картинку: кіт"));
+  assert.ok(!isDrawCmd("@babtsya_z_altanky_bot вона малює щодня") && !isDrawCmd("@babtsya_z_altanky_bot що там Зеленський?") && !isDrawCmd("продовж вірш про малювання"));
+  assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу картинкою"), "хропіллу");
+  assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй мені, будь ласка, кота в чоботях"), "кота в чоботях");
+  assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй"), ""); // nothing named: the replied-to text decides
+  assert.ok(["намалюй кота", "малюй кота", "намалюйте кота", "змалюй кота", "можеш намалювати кота?", "намалюєш кота?", "накидай кота", "зобрази кота", "рисуй кота", "нарисуй кота", "нарисуйте кота", "можешь нарисовать кота?", "нарисуешь кота?", "изобрази кота", "сгенерируй картинку кота", "згенеруй картинку кота", "сделай мне картинку кота", "створи зображення кота", "дай малюнок кота", "покажи рисунок кота", "скинь арт кота"].every((q) => isDrawCmd(`@babtsya_z_altanky_bot ${q}`)));
+  assert.ok(!isDrawCmd("@babtsya_z_altanky_bot дай Артема") && !isDrawCmd("@babtsya_z_altanky_bot дай мені спокій") && !isDrawCmd("@babtsya_z_altanky_bot покажи, як ти малюєш"));
+  assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
+  assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
   console.log("pipeline: самоперевірка ок");
 }

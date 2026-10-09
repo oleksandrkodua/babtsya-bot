@@ -13,7 +13,7 @@ import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
   BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -55,6 +55,8 @@ const IMAGE_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
 const POSTER = "Ти пишеш опис картинки-афіші до п'єси сусідського чату для генератора зображень. Тобі дають назву й заголовки сцен. Обери ОДИН конкретний смішний момент із головної історії дня (що саме роблять люди, який предмет у центрі) і опиши його АНГЛІЙСЬКОЮ одним-двома реченнями: двір панельного будинку, альтанка біля супермаркету, лавка, бурчлива бабця-оповідачка, сусіди — без конкретних облич. Без реальних людей і імен, без тексту й літер на картинці, без війни й зброї. Весело й яскраво, без похмурих чи загрозливих фігур. Лише опис англійською, нічого більше.";
 // Style goes first: FLUX weighs the start of the prompt most, and a trailing "gouache poster" came out as a dark photo (25.09.2026).
 // People came out East Asian-looking (29.09.2026): neighbours are Eastern Europeans, without folklore overload.
+// A picture on request (09.10.2026, "@бабця намалюй хропіллу картинкою"): Gemma turns the ask into an English scene, or NO.
+const PAINT = "Ти пишеш опис картинки для генератора зображень за проханням із чату. Тобі дають прохання й, можливо, контекст (опис того, що просять намалювати). Опиши АНГЛІЙСЬКОЮ одним-двома реченнями, що намалювати: головний предмет у центрі, його вигляд (бери з контексту, якщо там є опис), фон. Вигадані істоти й предмети малюй як описано. Весело, без тексту й літер на картинці. Якщо просять намалювати реальну людину за іменем чи прізвищем, оголене тіло, насильство, зброю, війну, розправу чи приниження за національністю, вірою, статтю чи зовнішністю — відповідай одним словом NO. Звертання до бабці й лайка на її адресу («стара», «карга», «ти») — не частина того, що малювати: ігноруй їх. Усі люди й істоти на картинці повністю одягнені, без оголеного тіла. Лише опис англійською або NO, нічого більше.";
 const POSTER_STYLE = "Bright naive folk-art illustration, flat vivid colors, thick outlines, humorous cartoon, cheerful warm light. Characters are ordinary Eastern European (Ukrainian) neighbours with Slavic European features in everyday modern clothes, no national costumes, no flags. ";
 // klein (29.09.2026) wrote "SUPRMARET" on a fridge and a fake "@signature" in the corner: every kind of lettering named.
 const NO_TEXT = " Absolutely no text anywhere: no letters, words, labels, brand names, logos, signs, captions, signature or watermark.";
@@ -309,13 +311,13 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   // With more than the name the fixed phrase leads and the model carries on: "шизік, знов дуріє…" (26.09.2026).
   const topic = fixed ? { key: "фраза+", hint: `Про цю людину в бабці одна думка — «${fixed}». Почни відповідь дослівно з «${fixed}» і розвинь далі по суті того, що спитали, українською, у стилі Подерв'янського.${rule.angles ? " Розвивай за напрямком із розбору (ПАМ'ЯТЬ і СУТЬ), своїми словами, не дослівно." : ""}` }
-    : topicFor(raw, kyiv(new Date()).hour); // "@бабця + word": a matching topic replaces the random move
+    : replyTopic(raw, kyiv(new Date()).hour, other?.text, news); // "@бабця + word": a matching topic replaces the random move
   // "Продовжи вірш" / "підбери риму" (08.10.2026): with no start or no word there is nothing to ask the model — a stock reply.
   const verse = topic?.key === "продовж" ? verseStart(raw, other, botText) : null, rhymeWord = topic?.key === "рима" ? rhymeTarget(raw) : null;
   if (topic?.key === "продовж" && !verse) return { tone: "фраза", text: pick(NO_START) };
   if (topic?.key === "рима" && !rhymeWord) return { tone: "фраза", text: pick(NO_WORD) };
   const shown = verse ? verseCommand(raw) : raw; // the start goes to the model once, in its own block, not again inside the ask
-  const tone = !["хороше", "рецепт", "вірш", "комплімент", "загадка", "підсумок", "кіно", "слово", "пісня", "продовж", "рима"].includes(topic?.key) && Math.random() < RUDE_SHARE ? "rude" : "wise"; // never rude for "good" or a recipe
+  const tone = !["хороше", "рецепт", "вірш", "комплімент", "загадка", "підсумок", "кіно", "слово", "пісня", "продовж", "рима", "удар по Україні"].includes(topic?.key) && Math.random() < RUDE_SHARE ? "rude" : "wise"; // never rude for "good" or a recipe
   // Who in the conversation is a woman, so a mentioned member gets the right gender and case (25.09.2026).
   const gender = genderLine([name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean), femaleSet(env.FEMALE_NAMES));
   const present = new Set([name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])]);
@@ -354,7 +356,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // repeats are kept away by her own last lines (said) instead.
   const mine = raw.replace(/@\w+/g, ""), chatText = bodies(context); // theme triggers see the ask and message bodies, never names or titles
   const draft = async (bar = "") => {
-    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${topic?.verse ? "" : `${who}${byName} ${REPLY_TONES[tone]} `}${tone === "rude" ? cursesHint(CURSES, mine, chatText, past) + " " : ""}${hints && !topic?.verse ? lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }) : ""} ${topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone])}${replyTail(topic, long)}${bar})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
+    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${topic?.verse ? "" : `${who}${byName} ${topic?.plain ? "" : `${REPLY_TONES[tone]} `}`}${tone === "rude" ? cursesHint(CURSES, mine, chatText, past) + " " : ""}${hints && !topic?.verse && !topic?.plain ? lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }) : ""} ${topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone])}${replyTail(topic, long)}${bar})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
     const out = said ? tidy(warFallback(stripHints(said.trim(), "").replace(/^[«"]+|[»"]+$/g, ""), raw)) : "";
     return verse ? verseTail(verse, out) ?? "" : rhymeWord ? rhymeTail(rhymeWord, out) ?? "" : out; // a failed verse draft is dropped
   };
@@ -385,15 +387,31 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   return { tone: topic?.key || tone, text: dropName(text, to).slice(0, long ? 1500 : 500), brief, briefWhy, score, to };
 }
 
+// The picture itself: ~180 neurons, so with the day's budget gone (the "(N)" counter at 0) she says no, in her voice.
+async function paint(env, msg, name, raw, botText, other) {
+  const send = (text) => telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
+  if ((await left(env).catch(() => 1)) === 0) return send(oneOf(NO_PAINT)).then(() => console.log(`Малюнок ${name}: немає нейронів`));
+  const subject = drawSubject(raw), ctx = botText || other?.text || "";
+  if (!subject && !ctx) return send("Шо малювати, га? Скажи, шо саме.");
+  const scene = (await ai(env, PAINT, `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${ctx ? `\nКонтекст: ${excerpt(ctx, 400)}` : ""}`, 0.7, 150)).trim();
+  if (/^NO\b/i.test(scene)) return send(oneOf(REFUSE_PAINT)).then(() => console.log(`Малюнок ${name}: відмова — ${subject}`));
+  const jpeg = scene ? await draw(env, POSTER_STYLE + scene + POSTER_END) : null;
+  if (!jpeg) return send(NAP[Math.floor(Math.random() * NAP.length)]).then(() => console.log(`Малюнок ${name}: без картинки [${lastDraw}]`));
+  const count = await left(env).then((k) => ` (${k})`, () => "");
+  await sendPhoto(env, msg.chat.id, jpeg, oneOf(PAINT_CAPS) + count, msg.message_id);
+  console.log(`Малюнок ${name}: ${scene}`);
+}
+
 async function answer(env, msg, name, raw, botText, other = null, news = "", photo = "") {
   // The last 20 messages, so she answers the conversation and not just the one line (25.09.2026).
   // ponytail: right after a play the table is emptied and there's little context until people write again.
   const { results } = await env.DB.prepare("SELECT name, text FROM messages WHERE message_id != ? ORDER BY ts DESC LIMIT 20").bind(msg.message_id).all();
   const context = tailFit(results.reverse().map((r) => contextLine(r.name, r.text)), 200, 3000).join("\n");
   // "Бабця з альтанки друкує…" while the chain runs; Telegram shows it for ~5 s, so it's renewed.
-  const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: "typing" }).catch(() => {});
+  const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: isDrawCmd(raw) ? "upload_photo" : "typing" }).catch(() => {});
   typing();
   const tick = setInterval(typing, 4500);
+  if (isDrawCmd(raw)) return paint(env, msg, name, raw, botText, other).catch((e) => console.log(`Малюнок ${name}: збій — ${e.stack || e.message}`)).finally(() => clearInterval(tick));
   const lean = (await left(env).catch(() => 1)) === 0; // no spend table yet → full replies
   const pic = photo ? await look(env, photo) : "";
   if (photo) console.log(`Фото для ${name}: ${pic || "не розгледіла"}`);
@@ -748,8 +766,9 @@ async function stockMeat(env) {
   return `stock: ${score} (${answers.map((x) => x.trim()).join(" / ")})`;
 }
 
-async function sendPhoto(env, chat, jpeg, caption) {
+async function sendPhoto(env, chat, jpeg, caption, replyTo = 0) {
   const form = new FormData();
+  if (replyTo) form.append("reply_parameters", JSON.stringify({ message_id: replyTo, allow_sending_without_reply: true }));
   form.append("chat_id", String(chat));
   form.append("caption", shortDash(caption).slice(0, 1024)); // Telegram's caption limit
   form.append("photo", new Blob([jpeg], { type: "image/jpeg" }), "babtsya.jpg");
