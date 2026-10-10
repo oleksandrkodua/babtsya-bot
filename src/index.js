@@ -13,7 +13,7 @@ import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
   BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -56,7 +56,7 @@ const POSTER = "Ти пишеш опис картинки-афіші до п'є�
 // Style goes first: FLUX weighs the start of the prompt most, and a trailing "gouache poster" came out as a dark photo (25.09.2026).
 // People came out East Asian-looking (29.09.2026): neighbours are Eastern Europeans, without folklore overload.
 // A picture on request (09.10.2026, "@бабця намалюй хропіллу картинкою"): Gemma turns the ask into an English scene, or NO.
-const PAINT = "Ти пишеш опис картинки для генератора зображень за проханням із чату. Тобі дають прохання й, можливо, контекст (опис того, що просять намалювати). Опиши АНГЛІЙСЬКОЮ одним-двома реченнями, що намалювати: головний предмет у центрі, його вигляд (бери з контексту, якщо там є опис), фон. Вигадані істоти й предмети малюй як описано. Весело, без тексту й літер на картинці. Якщо просять намалювати реальну людину за іменем чи прізвищем, оголене тіло, насильство, зброю, війну, розправу чи приниження за національністю, вірою, статтю чи зовнішністю — відповідай одним словом NO. Звертання до бабці й лайка на її адресу («стара», «карга», «ти») — не частина того, що малювати: ігноруй їх. Усі люди й істоти на картинці повністю одягнені, без оголеного тіла. Лише опис англійською або NO, нічого більше.";
+const PAINT = "Ти пишеш опис картинки для генератора зображень за проханням із чату. Тобі дають прохання й, можливо, контекст (опис того, що просять намалювати). Опиши АНГЛІЙСЬКОЮ одним-двома реченнями, що намалювати: головний предмет у центрі, його вигляд (бери з контексту, якщо там є опис), фон. Вигадані істоти й предмети малюй як описано. Весело, без тексту й літер на картинці. Якщо просять портрет самої бабці (того, хто відповідає) — малюй добру бурчливу бабцю в хустці. Імена сусідів із чату («Коля», «Олександр») — це друзі: НЕ відмовляй, а малюй безлику мультяшну постать у звичайному одязі без конкретних рис і без імені; число чи незрозуміле слово («33») подай як смішний предмет або кількість предметів (33 — штрафна банка, 33 грн), а якщо зовсім незрозуміло — вигадай веселу сцену з двору. Відповідай NO лише якщо просять портрет відомої реальної людини (політик, зірка), оголене тіло, насильство, зброю, війну, розправу чи приниження за національністю, вірою, статтю чи зовнішністю — відповідай одним словом NO. Звертання до бабці й лайка чи образи на її адресу («стара», «карга», «ти», «збоченка», «дурна») — не причина відмовляти й не частина того, що малювати: ігноруй їх. Усі люди й істоти на картинці повністю одягнені, без оголеного тіла. Лише опис англійською або NO, нічого більше.";
 const POSTER_STYLE = "Bright naive folk-art illustration, flat vivid colors, thick outlines, humorous cartoon, cheerful warm light. Characters are ordinary Eastern European (Ukrainian) neighbours with Slavic European features in everyday modern clothes, no national costumes, no flags. ";
 // klein (29.09.2026) wrote "SUPRMARET" on a fridge and a fake "@signature" in the corner: every kind of lettering named.
 const NO_TEXT = " Absolutely no text anywhere: no letters, words, labels, brand names, logos, signs, captions, signature or watermark.";
@@ -306,12 +306,12 @@ const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2:
 // Nina is meant for Nina (25.09.2026) — the brief decides whom she answers.
 async function compose(env, name, raw, botText, temperature = REPLY_TEMP, context = "", other = null, draftsN = REPLY_DRAFTS, news = "", pic = "", hints = true) {
   // A verse/rhyme request is never a fixed-phrase one: a verse that mentions "рудий" or a surname kept answering "шизік…" (08.10.2026).
-  const rule = isVerseCmd(raw) ? null : fixedFor(raw), fixed = rule?.text; // "@бабця + surname": the user's own answer
+  const replied = Boolean(other?.text || botText), rule = isVerseCmd(raw) || bareVerseCmd(raw, replied) ? null : fixedFor(raw), fixed = rule?.text; // "@бабця + surname": the user's own answer
   if (fixed && (rule.always || fixedIsBare(raw))) return { tone: "фраза", text: fixed }; // just the name (or Порошенко) — word for word
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   // With more than the name the fixed phrase leads and the model carries on: "шизік, знов дуріє…" (26.09.2026).
   const topic = fixed ? { key: "фраза+", hint: `Про цю людину в бабці одна думка — «${fixed}». Почни відповідь дослівно з «${fixed}» і розвинь далі по суті того, що спитали, українською, у стилі Подерв'янського.${rule.angles ? " Розвивай за напрямком із розбору (ПАМ'ЯТЬ і СУТЬ), своїми словами, не дослівно." : ""}` }
-    : replyTopic(raw, kyiv(new Date()).hour, other?.text, news); // "@бабця + word": a matching topic replaces the random move
+    : bareVerseTopic(raw, replied) ?? replyTopic(raw, kyiv(new Date()).hour, other?.text, news); // "@бабця + word": a matching topic replaces the random move
   // "Продовжи вірш" / "підбери риму" (08.10.2026): with no start or no word there is nothing to ask the model — a stock reply.
   const verse = topic?.key === "продовж" ? verseStart(raw, other, botText) : null, rhymeWord = topic?.key === "рима" ? rhymeTarget(raw) : null;
   if (topic?.key === "продовж" && !verse) return { tone: "фраза", text: pick(NO_START) };
@@ -356,7 +356,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // repeats are kept away by her own last lines (said) instead.
   const mine = raw.replace(/@\w+/g, ""), chatText = bodies(context); // theme triggers see the ask and message bodies, never names or titles
   const draft = async (bar = "") => {
-    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${topic?.verse ? "" : `${who}${byName} ${topic?.plain ? "" : `${REPLY_TONES[tone]} `}`}${tone === "rude" ? cursesHint(CURSES, mine, chatText, past) + " " : ""}${hints && !topic?.verse && !topic?.plain ? lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }) : ""} ${topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone])}${replyTail(topic, long)}${bar})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
+    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${topic?.verse ? "" : `${who}${byName} ${topic?.plain ? "" : `${REPLY_TONES[tone]} `}`}${tone === "rude" ? cursesHint(CURSES, mine, chatText, past) + " " : ""}${hints && !topic?.verse && !topic?.plain ? lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }) : ""} ${topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone])}${verse ? verseAnchorHint(verse) : ""}${replyTail(topic, long)}${bar})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
     const out = said ? tidy(warFallback(stripHints(said.trim(), "").replace(/^[«"]+|[»"]+$/g, ""), raw)) : "";
     return verse ? verseTail(verse, out) ?? "" : rhymeWord ? rhymeTail(rhymeWord, out) ?? "" : out; // a failed verse draft is dropped
   };
@@ -391,9 +391,10 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
 async function paint(env, msg, name, raw, botText, other) {
   const send = (text) => telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
   if ((await left(env).catch(() => 1)) === 0) return send(oneOf(NO_PAINT)).then(() => console.log(`Малюнок ${name}: немає нейронів`));
-  const subject = drawSubject(raw), ctx = botText || other?.text || "";
-  if (!subject && !ctx) return send("Шо малювати, га? Скажи, шо саме.");
-  const scene = (await ai(env, PAINT, `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${ctx ? `\nКонтекст: ${excerpt(ctx, 400)}` : ""}`, 0.7, 150)).trim();
+  const subject = drawSubject(raw), self = selfPortrait(raw);
+  const ctx = [botText, other?.text].find((t) => t && !isStockPaint(t)) || "";
+  if (!subject && !ctx && !self) return send("Шо малювати, га? Скажи, шо саме.");
+  const scene = self ? SELF_SCENE : (await ai(env, PAINT, `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${ctx ? `\nКонтекст: ${excerpt(ctx, 400)}` : ""}`, 0.7, 150)).trim();
   if (/^NO\b/i.test(scene)) return send(oneOf(REFUSE_PAINT)).then(() => console.log(`Малюнок ${name}: відмова — ${subject}`));
   const jpeg = scene ? await draw(env, POSTER_STYLE + scene + POSTER_END) : null;
   if (!jpeg) return send(NAP[Math.floor(Math.random() * NAP.length)]).then(() => console.log(`Малюнок ${name}: без картинки [${lastDraw}]`));

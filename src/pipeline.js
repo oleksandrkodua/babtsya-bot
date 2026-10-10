@@ -107,14 +107,14 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
 // ponytail: stem-in-chat heuristic — a metaphor slips through on a day a member wrote the same word.
 export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []).map((w) => w.toLowerCase()))].filter((w) => !chat.toLowerCase().includes(w));
 
-// Grumbles: every 2 h from 08:00 to 18:00 Kyiv (minutes of the day; was every 90 min till 30.09.2026); 08:00 is always a morning one.
+// Grumbles: every 3.5 h — 08:00, 11:30, 15:00, 18:30 Kyiv (minutes of the day; user, 10.10.2026; every 2 h till then, every 90 min till 30.09.2026); 08:00 is always a morning one.
 // 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
 // ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 22:30, then the evening play; the poll is sent by hand
 // (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
 export const ONE_OFF = { day: "2026-09-30", quietUntil: 22 * 60 + 30, evening: 22 * 60 + 30 }; // minutes of the day
 export const oneOff = (day) => (day === ONE_OFF.day ? ONE_OFF : null);
-export const GRUMBLE_SLOTS = [480, 600, 720, 840, 960, 1080];
-export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00 (the 14:00 grumble is skipped)
+export const GRUMBLE_SLOTS = [480, 690, 900, 1110];
+export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00 
 const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tune on the real group
 
 // Сусід gets one phrase a day at a half-hour tick 09:00–19:30 that no regular grumble uses and that isn't in the
@@ -996,12 +996,33 @@ export const verseStart = (raw, other, botText) => {
   const ok = (t) => t.length >= 12 && t.split(/\s+/).length >= 2;
   const tidyLines = (t) => t.replace(/\r/g, "").split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
   const after = m ? tidyLines(clean.slice(m.index + m[0].length).replace(/^[\s:;,.!?\-—–]+/, "")) : "";
-  const before = m ? tidyLines(clean.slice(0, m.index)) : tidyLines(clean);
+  const bare = m ? null : bareParse(raw); // the command is not a line of the verse
+  const before = m ? tidyLines(clean.slice(0, m.index)) : tidyLines(bare ? bare.rest.join("\n") : clean);
   const src = [after, before, tidyLines(other?.text ?? ""), tidyLines(botText ?? "")].find(ok);
   return src ? cutTail(src) : null;
 };
 // A verse or rhyme request: its text may hold words of a fixed phrase ("рудий", a surname) that must not hijack it.
 export const isVerseCmd = (raw) => { const t = raw.replace(/@\w+/g, " "); return VERSE_CMD.test(t) || RHYME_CMD.test(t); };
+// A bare "продовжи" / "допиши" / "добий" (09.10.2026, live: "@бабця продовжи" under a two-line verse got prose and the tic):
+// it is a verse command only when it stands alone on its line, or closes the last line of the verse itself ("…рвати @бабця
+// давай продовжи", live 09.10.2026), AND either replies to a message or comes with at least two other lines of text. Only the "keep writing" verbs: "закінчи" / "доверши" / "дороби" are too common outside verse.
+const BARE_VERB = "продовжи(?:ть)?|продовжуй(?:те)?|продовж|продолжи|продолжай|допиши(?:ть)?|дописуй(?:те)?|добий(?:те)?|добей";
+const BARE_FILL = "ну|ще|давай|далі|будь\\s+ласка|пж|плз|плиз|бабцю|бабко|стара|мені";
+const BARE_LINE = new RegExp(`^[^\\p{L}]*(?:(?:${BARE_FILL})[^\\p{L}]+)*(?:${BARE_VERB})(?:[^\\p{L}]+(?:${BARE_FILL}))*[^\\p{L}]*$`, "iu");
+const BARE_TAIL = new RegExp(`(?<![\\p{L}])(?:(?:${BARE_FILL})[^\\p{L}]+)*(?:${BARE_VERB})(?:[^\\p{L}]+(?:${BARE_FILL}))*[^\\p{L}]*$`, "iu");
+const hasText = (l) => /\p{L}/u.test(l);
+// { cmd: the command words, rest: the other non-empty lines (the verse itself) } or null
+const bareParse = (raw) => {
+  const lines = raw.replace(/@\w+/g, " ").split("\n").map((l) => l.trim()), i = lines.findIndex((l) => BARE_LINE.test(l));
+  if (i >= 0) return { cmd: lines[i], rest: lines.filter((l, j) => j !== i && hasText(l)) };
+  const last = lines.findLastIndex(hasText), m = last < 0 ? null : BARE_TAIL.exec(lines[last]);
+  return m ? { cmd: m[0].trim(), rest: [...lines.slice(0, last), lines[last].slice(0, m.index)].map((l) => l.trim()).filter(hasText) } : null;
+};
+export const bareVerseCmd = (raw, replied = false) => {
+  const b = bareParse(raw);
+  return Boolean(b) && (replied || b.rest.length >= 2);
+};
+export const bareVerseTopic = (raw, replied = false) => bareVerseCmd(raw, replied) ? REPLY_TOPICS.find((t) => t.key === "продовж") : null;
 // "@бабця намалюй Хропіллу картинкою" (09.10.2026): a request for a picture never goes through the text chain.
 // Imperatives only ("малює" in a story is not a command); the subject is what follows the verb, or the noun in "дай картинку X".
 const CYR = "а-яіїєґё'’";
@@ -1018,9 +1039,16 @@ export const drawSubject = (raw) => {
   const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean);
   if (!m) return "";
   const rest = (clean.slice(0, m.index) + " " + clean.slice(m.index + m[0].length))
-    .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
+    .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|збоченк\S*|збоченец|дурн\S*|дурепа|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
   return rest.replace(/\s+/g, " ").replace(/^[\s:;,.!?\-—–]+|[\s:;,.!?\-—–]+$/g, "").slice(0, 200);
 };
+// "Тебе портрет просять намалювати" (10.10.2026): the model said NO to a self-portrait with an insult in the ask. Her own
+// portrait is a fixed scene, never a refusal.
+const SELF_PORTRAIT = /(?<![а-яіїєґё])(?:портрет\s+(?:бабц|тебе|себе|твій)|(?:тебе|себе|бабцю|бабку|бабусю)\s+(?:саму\s+)?(?:портрет|намалю)|(?:намалю\S*|малю\S*|нарису\S*)\s+(?:тебе|себе|бабцю|бабусю)|твій\s+портрет|свій\s+портрет)/iu;
+export const selfPortrait = (raw) => SELF_PORTRAIT.test(raw.replace(/@\w+/g, " "));
+export const SELF_SCENE = "A cheerful grumpy Ukrainian grandmother in a floral headscarf and a knitted cardigan, sitting on a wooden bench in a gazebo by a supermarket, arms folded, with a raised eyebrow and a sly smile; panel apartment blocks behind her. Portrait, fully clothed.";
+// Stock refusals she sent herself must not become the "context" of the next ask (10.10.2026).
+export const isStockPaint = (t) => [...NO_PAINT, ...REFUSE_PAINT].some((x) => t.startsWith(x.slice(0, 25)));
 export const NO_PAINT = [
   "Фарби на сьогодні скінчились, пензлик висох. Проси завтра, бабця ще й не таке намалює.",
   "Бабця сьогодні вже намалювала все, шо могла. Завтра приходь із олівцем.",
@@ -1031,7 +1059,7 @@ export const REFUSE_PAINT = [
 ];
 export const PAINT_CAPS = ["Ось, малювала на колінці - не вередуй.", "Тримай шедевр, пензлик ще мокрий.", "Намалювала, як побачила. Не подобається - дивись у вікно."];
 // Just the command ("продовж вірш") — the start is shown to the model once, in its own block, not again inside the ask.
-export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.[0] ?? raw;
+export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.[0] ?? bareParse(raw)?.cmd ?? raw;
 // What draft() appends to every hint. A verse topic has its own length and comparison rules: "до 12 рядків" and "одне
 // порівняння" would fight "4–8 рядків" and a rhymed punchline.
 export const replyTail = (topic, long) => topic?.verse || topic?.plain ? "" : ` Щонайбільше одне порівняння, і лише з предмета питання чи розмови.${long ? " Тут можна довше — до 12 рядків." : ""}`;
@@ -1088,6 +1116,16 @@ export const rhymeScore = (text, start = "") => {
 export const rhymeFirst = (drafts, start = "") => {
   const top = Math.max(...drafts.map((d) => rhymeScore(d, start)));
   return drafts.filter((d) => rhymeScore(d, start) === top);
+};
+// The word the continuation must answer: the start's last line ends on a rhyme nobody has closed yet ("…сраку рвати").
+// Live 09.10.2026: the model was never told which word to rhyme with, so the reply rhymed only with itself, if at all.
+export const rhymeAnchor = (start) => {
+  const ends = start.split("\n").map(lineEnd).filter(Boolean), last = ends.at(-1);
+  return last && last.length >= 3 && !ends.slice(-3, -1).some((w) => rhymes(last, w)) ? last : null;
+};
+export const verseAnchorHint = (start) => {
+  const w = rhymeAnchor(start);
+  return `${w ? ` Перший новий рядок має римуватися зі словом «${w}» (ним закінчується початок).` : ""} Далі римуй парами: рядки 1–2, 3–4 тощо, кінці рядків мають звучати однаково.`;
 };
 // The word to rhyme (08.10.2026): the first word after "риму / рифму / зарифмуй / римуй" ("до", "на", "слова" skipped).
 const NOT_A_WORD = new Set(["мені", "будь", "ласка", "слова", "слово", "слову", "якесь", "якийсь", "яку", "якусь"]);
@@ -1603,6 +1641,33 @@ if (import.meta.main) {
     const closes = "Йому сказала: привіт,\nА він: давай обід,\nІ пішли удвох у світ,\nНа цей смачний обід", alone = "Бо хліб їй не потрібен\nІ нічого не питала\nА вона лише стояла\nІ дивилась на кіш";
     assert.ok(rhymeScore(closes, open3) > rhymeScore(alone, open3)); // the draft that closes the start's open rhyme wins
     assert.deepEqual(rhymeFirst([alone, closes], open3), [closes]);
+    // rhymeAnchor (09.10.2026): the open rhyme of the start is named to the model; a closed one is not
+    assert.equal(rhymeAnchor("ми за виноградар\nбудем сраку рвати"), "рвати");
+    assert.equal(rhymeAnchor(open3), "кіт"); // the third line has no pair yet
+    assert.equal(rhymeAnchor(sample), null); // нема/дарма closes the couplet
+    assert.equal(rhymeAnchor("Гуде вітер у полі,\nСидить бабця коло воріт,\nА вона не кричить від болі"), null); // ABAB: болі answers полі
+    assert.ok(/«рвати»/.test(verseAnchorHint("ми за виноградар\nбудем сраку рвати")) && !/«/.test(verseAnchorHint(sample)) && /парами/.test(verseAnchorHint(sample)));
+    // bare "продовжи" (09.10.2026): a command only alone on its line and with a reply or two more lines of text
+    const bt = "@babtsya_z_altanky_bot", two = "ми за виноградар\nбудем сраку рвати";
+    for (const [txt, replied, want] of [[`${bt} продовжи`, true, true], [`${bt} допиши`, true, true], [`${bt} добий`, true, true], [`${bt} Продовжуй!`, true, true], [`${bt} будь ласка, продовжи`, true, true],
+      [`${bt} продовжи`, false, false], [`${bt} продовжи\nодин рядок`, false, false], [`${bt} продовжи\n${two}`, false, true], [`${two}\n${bt} допиши`, false, true],
+      [`${bt} продовжимо розмову`, true, false], [`${bt} продовжи розмову`, true, false], [`${bt} закінчи`, true, false], [`${bt} доверши`, true, false], [`${bt} допиши рядок коду`, true, false], ["продовжи", false, false]])
+      assert.equal(bareVerseCmd(txt, replied), want, `${txt} / ${replied}`);
+    assert.equal(bareVerseTopic(`${bt} продовжи`, true)?.key, "продовж");
+    assert.equal(bareVerseTopic(`${bt} продовжи`, false), null);
+    assert.equal(verseStart(`${bt} продовжи`, { name: "Ко Ко", text: two }, ""), two); // the replied-to message is the start
+    assert.equal(verseStart(`${bt} продовжи\n${two}`, null, ""), two); // the command line is not part of it
+    assert.equal(verseStart(`${two}\n${bt} допиши`, null, ""), two);
+    assert.equal(verseCommand(`${bt} продовжи\n${two}`), "продовжи");
+    assert.equal(verseCommand(`${bt} продовжи`), "продовжи");
+    // the command closing the last line of the verse (live 09.10.2026: "…сраку рвати @бабця давай продовжи")
+    const tail = `${two} ${bt} давай продовжи`;
+    assert.ok(bareVerseCmd(tail, false) && bareVerseCmd(tail, true));
+    assert.equal(verseStart(tail, null, ""), two);
+    assert.equal(verseCommand(tail), "давай продовжи");
+    assert.equal(bareVerseTopic(tail, false)?.key, "продовж");
+    for (const [txt, replied, want] of [[`Ми всі втомились ${bt} давай продовжи`, false, false], [`Ми всі втомились ${bt} давай продовжи`, true, true], [`${two} ${bt} продовжимо`, false, false], [`${two} ${bt} допиши рядок коду`, false, false], [`${two} ${bt} закінчи`, false, false], [`${two}\n${bt} допиши, будь ласка!`, false, true]])
+      assert.equal(bareVerseCmd(txt, replied), want, `${txt} / ${replied}`);
     // rhymeTarget / rhymeTail (08.10.2026)
     for (const [t, w] of [["підбери риму до сонце", "сонце"], ["@бабця рима до слова бабця", "бабця"], ["зарифмуй каша", "каша"], ["дай рифму до «Марсель»", "Марсель"], ["підбери риму", null], ["підбери риму, будь ласка", null]]) assert.equal(rhymeTarget(t), w, t);
     assert.equal(rhymeTail("Марсель", "газель, пастель, стіл, шинель\nЗнає вся Європа з-під Марсель,\nа корова не схожа на газель."), "газель, пастель, шинель\nЗнає вся Європа з-під Марсель,\nа корова не схожа на газель.");
@@ -1756,6 +1821,11 @@ if (import.meta.main) {
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй мені, будь ласка, кота в чоботях"), "кота в чоботях");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй"), ""); // nothing named: the replied-to text decides
   assert.ok(["намалюй кота", "малюй кота", "намалюйте кота", "змалюй кота", "можеш намалювати кота?", "намалюєш кота?", "накидай кота", "зобрази кота", "рисуй кота", "нарисуй кота", "нарисуйте кота", "можешь нарисовать кота?", "нарисуешь кота?", "изобрази кота", "сгенерируй картинку кота", "згенеруй картинку кота", "сделай мне картинку кота", "створи зображення кота", "дай малюнок кота", "покажи рисунок кота", "скинь арт кота"].every((q) => isDrawCmd(`@babtsya_z_altanky_bot ${q}`)));
+  // 10.10.2026: "Збоченка. Тебе портрет просять намалювати" was refused; a self-portrait is a fixed scene, a stock refusal is no context.
+  assert.ok(selfPortrait("@babtsya_z_altanky_bot Збоченка. Тебе портрет просять намалювати") && selfPortrait("намалюй себе") && selfPortrait("намалюй твій портрет") && !selfPortrait("намалюй кота"));
+  assert.ok(isStockPaint(REFUSE_PAINT[0]) && !isStockPaint("Такий собі кіт"));
+  assert.ok(!/збоченк/i.test(drawSubject("@babtsya_z_altanky_bot Збоченка. намалюй кота")));
+  assert.deepEqual(GRUMBLE_SLOTS, [480, 690, 900, 1110]);
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot дай Артема") && !isDrawCmd("@babtsya_z_altanky_bot дай мені спокій") && !isDrawCmd("@babtsya_z_altanky_bot покажи, як ти малюєш"));
   assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
