@@ -578,8 +578,9 @@ const WAR_FALLBACK = [
 // asked for by reply.txt and the judge; that ask is gone. The drafts with the fewest tics go on to the judge.
 // 08.10.2026: the frame returned as "це така ж безглузда затея, як намагатися …" (2 of 2 replies after the lexicon deploy,
 // 1 of 83 before), which "це як намагат" missed — so the tic is the verb phrase alone.
+// 10.10.2026: "це така велична й безглузда метафізика, як намагання …" (2 of 2 screenshots): "як намагання", the "така X і Y" pair and the word "метафізика" are tics too.
 const TICS = [/(?<![\p{L}])пафос/iu, /ніби ти тут/iu, /на деле(?![\p{L}])/iu, /завтра\s+(?:на|у|в)\s+(?:весь|всьому|усьому|цілому|цілий)\s+двор/iu,
-  /(?<![\p{L}])а отже(?![\p{L}])/iu, /як намагат/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
+  /(?<![\p{L}])а отже(?![\p{L}])/iu, /як намаг/iu, /(?<![\p{L}])така\s+(?:ж\s+)?[\p{L}]+\s+(?:і|й)\s+[\p{L}]+/iu, /метафізик/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
 const ticCount = (d, asked) => TICS.filter((re) => re.test(d) && !re.test(asked)).length;
 export const ticFree = (drafts, asked) => {
   const least = Math.min(...drafts.map((d) => ticCount(d, asked)));
@@ -1484,8 +1485,11 @@ if (import.meta.main) {
     const f1 = "Сусіде, це така ж марна і безглузда обізнаність, як намагатися порахувати копійки в дірявому чобітку.";
     const f2 = "Сусіде, твоя вимога - це така ж урочиста затія, як намагатися вигулькнути гімн перед калькулятором.", f3 = "Сусіде, ціни в АТБ знають лише каси та їхні сни.";
     assert.deepEqual(ticFree([f1, f3, f2], "що там з цінами в АТБ?"), [f3]); // the 08.10.2026 frame in two wordings loses to a clean draft
+    const g1 = "Костю, це така велична й безглузда метафізика, як намагання зважити совість.", g2 = "Костю, центнер — це сто кілограмів і жодної совісті.";
+    assert.deepEqual(ticFree([g1, g2], "що таке центнер?"), [g2]); // 10.10.2026
     assert.deepEqual(ticFree([f1], "x"), [f1]);
-    assert.deepEqual(ticFree([f1, f3], "як намагатися порахувати?"), [f1, f3]); // the author's own words never count
+    assert.deepEqual(ticFree([f1, f3], "як намагатися порахувати?"), [f3]); // "як намаг" is the author's, but the "така X і Y" pair still counts
+    assert.deepEqual(ticFree([f1, f3], "така марна і безглузда, як намагатися?"), [f1, f3]); // the author's own words never count
   }
   assert.equal(tidy("Колю, тазик - це просто суцільна, блядь, важка тупизна."), "Колю, тазик - це просто, блядь, важка тупизна.");
   assert.equal(tidy("Суцільний хаос. Суцільна пустота!"), "Хаос. Пустота!");
