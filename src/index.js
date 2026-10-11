@@ -13,7 +13,7 @@ import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
   BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -507,8 +507,8 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   if (!play) return { error: "п'єса" };
 
   if (play.length > HARD_LIMIT) {
-    const short = await ai(env, `Скороти п'єсу до ${hi} символів: прибери найслабші ремарки й повтори. Головну розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
-    if (short.length > 500 && short.length < play.length) play = keepHead(play, short);
+    const short = await ai(env, `Скороти п'єсу до ${hi} символів: прибери найслабші ремарки й повтори. Заголовки сцен «(Сцена N. Назва. Ремарка.)» лишай із назвою. Головну розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
+    if (short.length > 500 && short.length < play.length && titled(short) >= titled(play)) play = keepHead(play, short);
   }
   if (!playTitle(play) || !play.includes("Дійові особи:")) {
     // 02.10.2026 the play went out with no title (so no poster) and no cast: the head is put back by code.
@@ -572,8 +572,8 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   let full = await build(play);
   for (let i = 0; i < 2 && full.length > room; i++) {
     const target = play.length - (full.length - room) - 200;
-    const short = await ai(env, `Скороти п'єсу до ${target} символів. Усі сцени лишаються — їхня кількість, порядок, хто говорить і сенс. Стискай довгі репліки й ремарки, прибирай повтори й зайві слова. Розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
-    if (!(short.length > 500 && short.length < play.length && (short.match(/\(Сцена/g) ?? []).length >= (play.match(/\(Сцена/g) ?? []).length)) break;
+    const short = await ai(env, `Скороти п'єсу до ${target} символів. Усі сцени лишаються — їхня кількість, порядок, хто говорить і сенс. Заголовки сцен «(Сцена N. Назва. Ремарка.)» лишай із назвою. Стискай довгі репліки й ремарки, прибирай повтори й зайві слова. Розв'язку, фінальну репліку, мораль, стиль і лайку не чіпай. Поверни лише текст п'єси.`, play, 0.3);
+    if (!(short.length > 500 && short.length < play.length && (short.match(/\(Сцена/g) ?? []).length >= (play.match(/\(Сцена/g) ?? []).length && titled(short) >= titled(play))) break;
     console.log(`Довжина: ${full.length} > ${room}, скорочено п'єсу ${play.length} → ${short.length}`);
     play = keepHead(play, short);
     full = await build(play);

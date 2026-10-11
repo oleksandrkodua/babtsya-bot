@@ -1172,6 +1172,8 @@ export const addressesBot = (text) => /(?<![\w/])@babtsya_z_altanky_bot\b/i.test
 // starting at "(Сцена 1." — no title, so no poster, and no cast. keepHead puts the old head back on a shortened
 // text that lost it; ensureHead gives a play without one an empty cast block (castFix fills it from the speakers)
 // and the title, if one is given.
+// 11.10.2026: a play came out with bare "(Сцена 1)" headers (no name, no remark) — a shortened text must keep as many named ones.
+export const titled = (p) => (p.match(/^\(Сцена \d+\. /gm) ?? []).length;
 const sceneAt = (p) => p.search(/^\(Сцена 1\b/m);
 export function keepHead(old, short) {
   const o = sceneAt(old), n = sceneAt(short);
@@ -1816,6 +1818,7 @@ if (import.meta.main) {
   const long = ("абзац ".repeat(100) + "\n\n").repeat(10);
   assert.ok(finalize(long).length <= HARD_LIMIT && finalize("текст").startsWith(`${BOT_NAME} представляє`));
   assert.ok(finalize("««Симфонія»»").includes("«Симфонія»") && !finalize("««Симфонія»»").includes("««"));
+  assert.equal(titled("(Сцена 1. Двір. Тихо.)\nA: Ну\n\n(Сцена 2)\nB: Ага"), 1); // 11.10.2026: only named headers count
   assert.ok(finalize("Lida: ковбаска!\n(Сцена 2: корж)").includes("ковбаска!\n\n(Сцена 2"));
   assert.ok(finalize("«<Екзистенційний привід ШІ>»").includes("«Екзистенційний привід ШІ»"));
   assert.ok(finalize("пахне дешевимกาแฟ з АТБ, 漢字 теж").includes("пахне дешевим з АТБ, теж"));
