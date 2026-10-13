@@ -1104,6 +1104,52 @@ export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.
 // What draft() appends to every hint. A verse topic has its own length and comparison rules: "до 12 рядків" and "одне
 // порівняння" would fight "4–8 рядків" and a rhymed punchline.
 export const replyTail = (topic, long) => topic?.verse || topic?.plain ? "" : ` Щонайбільше одне порівняння, і лише з предмета питання чи розмови.${long ? " Тут можна довше — до 12 рядків." : ""}`;
+// The decisions of one reply, split out of compose() in index.js (13.10.2026): its wiring was only ever tested by a live
+// chat (the verse preamble, 08.10). Everything below is pure; the model calls stay in index.js.
+const NEVER_RUDE = ["хороше", "рецепт", "вірш", "комплімент", "загадка", "підсумок", "кіно", "слово", "пісня", "продовж", "рима", "удар по Україні"]; // never rude for "good" or a recipe
+export const LEAK_REPLY = "Шо ти мені тут вказуєш? Бабця сама знає, шо казати, а шо ні.";
+// What the tag asks for: a stock reply (no model call), or the topic, the verse start / rhyme word, the tone.
+// other = the member the tagged message replies to; rnd is injectable for the tests.
+export function replyPlan(raw, { other = null, botText = "", news = "", hour = 12, rnd = Math.random } = {}) {
+  const pick = (list) => list[Math.floor(rnd() * list.length)];
+  // A verse/rhyme request is never a fixed-phrase one: a verse that mentions "рудий" or a surname kept answering "шизік…" (08.10.2026).
+  const replied = Boolean(other?.text || botText), rule = isVerseCmd(raw) || bareVerseCmd(raw, replied) ? null : fixedFor(raw), fixed = rule?.text;
+  if (fixed && (rule.always || fixedIsBare(raw))) return { stock: { tone: "фраза", text: fixed } }; // just the name (or Порошенко) — word for word
+  // With more than the name the fixed phrase leads and the model carries on: "шизік, знов дуріє…" (26.09.2026).
+  const topic = fixed ? { key: "фраза+", hint: `Про цю людину в бабці одна думка — «${fixed}». Почни відповідь дослівно з «${fixed}» і розвинь далі по суті того, що спитали, українською, у стилі Подерв'янського.${rule.angles ? " Розвивай за напрямком із розбору (ПАМ'ЯТЬ і СУТЬ), своїми словами, не дослівно." : ""}` }
+    : bareVerseTopic(raw, replied) ?? replyTopic(raw, hour, other?.text, news); // "@бабця + word": a matching topic replaces the random move
+  // "Продовжи вірш" / "підбери риму" (08.10.2026): with no start or no word there is nothing to ask the model — a stock reply.
+  const verse = topic?.key === "продовж" ? verseStart(raw, other, botText) : null, rhymeWord = topic?.key === "рима" ? rhymeTarget(raw) : null;
+  if (topic?.key === "продовж" && !verse) return { stock: { tone: "фраза", text: pick(NO_START) } };
+  if (topic?.key === "рима" && !rhymeWord) return { stock: { tone: "фраза", text: pick(NO_WORD) } };
+  const tone = !NEVER_RUDE.includes(topic?.key) && rnd() < RUDE_SHARE ? "rude" : "wise";
+  return { rule, fixed, topic, verse, rhymeWord, tone, shown: verse ? verseCommand(raw) : raw }; // the start goes to the model once, in its own block, not again inside the ask
+}
+// The ask the brief, the drafts and the judge all see.
+export const replyAsk = ({ name, shown, botText = "", other = null, news = "", pic = "", verse = null, rhymeWord = null }) =>
+  `${name} пише: «${shown.slice(0, 500) || "(без тексту — гіфка, стікер чи фото)"}»${botText && !verse ? `\n(це відповідь на твоє: «${excerpt(botText, 300)}»)` : ""}${other && !verse ? `\n(це відповідь на повідомлення ${other.name}: «${excerpt(other.text, 300)}»)` : ""}${news ? `\n(питання про пересланий допис ${news} — відповідай саме про цю новину)` : ""}${pic ? `\n(на фото: ${pic} — якщо питають, що це чи де це, відповідай саме про фото, конкретно)` : ""}${verse ? `\n(ПОЧАТОК, який треба продовжити:\n«${verse}»)` : ""}${rhymeWord ? `\n(слово, до якого шукають риму: «${rhymeWord}»)` : ""}`;
+// Whom she answers: the member the tag replies to, when the code (forced) or the brief says so; otherwise the author.
+export const replyAddressee = (name, other, brief = "") => other && (other.forced || /Адресат:\s*ІНШ/i.test(brief)) ? other.name : name;
+export const addressLines = ({ name, to, woman, call }) => ({
+  who: `${to === name ? "Автор" : `Відповідай не автору, а ${to} — звертайся до ${woman ? "неї" : "нього"}. Адресат`} — ${woman ? "жінка: жіночий рід, «доню»" : "чоловік: чоловічий рід, «синку»"}.`,
+  byName: call ? ` Звертайся до ${woman ? "неї" : "нього"} дослівно «${call}» — саме в цій формі, не відмінюй і не міняй (раз), а не «${woman ? "доню" : "синку"}».` : "",
+});
+// The hint inside every draft. A verse gets nothing but its move: who/tone/chat-words invited a comment before the verse
+// (live, 08.10.2026). curses and lex are thunks so the gate is decided here.
+export function draftHint({ topic, hints = true, who, byName, tone, curses, lex, move, anchor = "", tail = "", bar = "" }) {
+  const head = topic?.verse ? "" : `${who}${byName} ${topic?.plain ? "" : `${REPLY_TONES[tone]} `}`;
+  const rude = tone === "rude" ? `${curses()} ` : "";
+  const words = hints && !topic?.verse && !topic?.plain ? lex() : "";
+  return `${head}${rude}${words} ${move}${anchor}${tail}${bar}`;
+}
+// After the model corrector: the fixed phrase leads once, names are put right, the answer's own name goes, the length is capped.
+export function finishReply(text, { fixed = "", names, to, long = false }) {
+  if (fixed) text = leadFixed(text, fixed);
+  return dropName(fixNames(text, names), to).slice(0, long ? 1500 : 500);
+}
+// What goes out: her own instructions never (30.09.2026), a stock line instead of silence.
+export const replyOut = (said, leaked, nap) => leaked ? LEAK_REPLY : said || nap;
+export const replyTarget = ({ to, name, other, messageId }) => to && to !== name && other ? other.id : messageId; // reply to the member she answers
 // Stock replies when there is nothing to ask the model about: a start, or a word to rhyme (0 neurons).
 export const NO_START = [
   "А де початок? Я що, ясновидиця? Кинь рядки, тоді й допишу.",
@@ -1926,5 +1972,74 @@ if (import.meta.main) {
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot хочу сказати про малюнок") && !isDrawCmd("@babtsya_z_altanky_bot цей малюнок гарний") && !isDrawCmd("@babtsya_z_altanky_bot треба купити хліб"));
   assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
+  { // the decisions of one reply (13.10.2026): compose() in index.js is wired from these, and only a live chat used to test the wiring
+    const B = "@babtsya_z_altanky_bot", lo = () => 0, hi = () => 0.99;
+    const start = "Знає вся Європа, Бердичів і Марсель,\nЩо худа корова не схожа на газель.\nТак що ви, дівчата, журитесь дарма,\nБо краса в двірі — це не лише зима.";
+    // fixed phrases: the name alone → the phrase and no model; with words → the phrase leads, the model goes on
+    assert.deepEqual(replyPlan(`${B} трамп`).stock, { tone: "фраза", text: fixedFor(`${B} трамп`).text });
+    const withWords = replyPlan(`${B} шо там трамп?`, { rnd: hi });
+    assert.ok(!withWords.stock && withWords.topic.key === "фраза+" && withWords.fixed === fixedFor(`${B} трамп`).text && withWords.topic.hint.includes(withWords.fixed));
+    // a verse or a rhyme is never a fixed-phrase reply, even with a name in the request (live, 08.10.2026)
+    const trumpy = start.replace("Бердичів", "Трамп"), rawVerse = `${B} продовж вірш:\n${trumpy}`;
+    assert.ok(fixedFor(rawVerse)); // the premise: the surname alone would answer "шизік…"
+    const verse = replyPlan(rawVerse, { rnd: lo });
+    assert.ok(!verse.stock && !verse.fixed && verse.topic.key === "продовж" && verse.verse === trumpy && verse.tone === "wise"); // rnd 0 would be rude for any other topic
+    assert.ok(!verse.shown.includes("Бердичів") && verse.shown.length < 60); // the start goes to the model once, not again inside the ask
+    assert.equal(replyPlan(`${B} продовж вірш`, { rnd: lo }).stock.text, NO_START[0]);
+    assert.equal(replyPlan(`${B} продовж вірш`, { rnd: hi }).stock.text, NO_START.at(-1));
+    assert.ok(NO_WORD.includes(replyPlan(`${B} підбери риму`, { rnd: lo }).stock.text));
+    const rhyme = replyPlan(`${B} підбери риму до Марсель`, { rnd: hi });
+    assert.ok(!rhyme.stock && rhyme.topic.key === "рима" && rhyme.rhymeWord && rhyme.tone === "wise");
+    assert.equal(replyPlan(`${B} продовж`, { botText: start, rnd: lo }).verse, start); // a bare "продовж" under her own verse
+    // tone: rude by the share, never for the topics that must stay kind
+    assert.equal(replyPlan(`${B} шо думаєш про погоду, стара?`, { rnd: lo }).tone, "rude");
+    assert.equal(replyPlan(`${B} шо думаєш про погоду, стара?`, { rnd: hi }).tone, "wise");
+    assert.equal(replyPlan(`${B} розкажи шось хороше`, { rnd: lo }).tone, "wise");
+    assert.equal(replyPlan(`${B} дай рецепт борщу`, { rnd: lo }).tone, "wise");
+    // the ask: the author, the message answered, the news, the photo, the verse start; the space after "повідомлення" (it was glued to the name)
+    const ask = replyAsk({ name: "Оля", shown: "шо це?", botText: "стара репліка", other: { name: "Ліда", text: "її слова" }, news: "«Погода»", pic: "кіт" });
+    assert.ok(ask.startsWith("Оля пише: «шо це?»") && ask.includes("відповідь на твоє: «стара репліка»") && ask.includes("повідомлення Ліда: «її слова»") && ask.includes("пересланий допис «Погода»") && ask.includes("на фото: кіт"));
+    const askVerse = replyAsk({ name: "Оля", shown: "продовж вірш", botText: "стара", other: { name: "Ліда", text: "ок" }, verse: start });
+    assert.ok(askVerse.includes(`ПОЧАТОК, який треба продовжити:\n«${start}»`) && !askVerse.includes("відповідь на") && !askVerse.includes("слово, до якого"));
+    assert.ok(replyAsk({ name: "Оля", shown: "", rhymeWord: "Марсель" }).includes("(без тексту") && replyAsk({ name: "Оля", shown: "", rhymeWord: "Марсель" }).includes("«Марсель»"));
+    assert.equal(replyAsk({ name: "О", shown: "а".repeat(900) }).length, "О пише: «»".length + 500);
+    // whom she answers: the code's choice (forced) or the brief's; an "other" in the brief without a replied-to member changes nothing
+    const lida = { name: "Ліда", text: "x", id: 77 };
+    assert.equal(replyAddressee("Оля", { ...lida, forced: true }, "Адресат: АВТОР"), "Ліда");
+    assert.equal(replyAddressee("Оля", lida, "Адресат: ІНШИЙ"), "Ліда");
+    assert.equal(replyAddressee("Оля", lida, "Адресат: АВТОР"), "Оля");
+    assert.equal(replyAddressee("Оля", null, "Адресат: ІНШИЙ"), "Оля");
+    assert.equal(replyAddressee("Оля", lida), "Оля");
+    const own = addressLines({ name: "Костя", to: "Костя", woman: false, call: "" });
+    assert.ok(own.who.startsWith("Автор — чоловік") && own.byName === "");
+    const other = addressLines({ name: "Костя", to: "Ліда", woman: true, call: "Лідо" });
+    assert.ok(other.who.startsWith("Відповідай не автору, а Ліда — звертайся до неї. Адресат — жінка") && other.byName.includes("«Лідо»") && !other.byName.includes("«синку»"));
+    // the draft hint: a verse gets nothing but its move (live, 08.10.2026: who/tone/chat words made a preamble before the verse)
+    const boom = () => { throw new Error("must not be asked"); };
+    const base = { who: "WHO.", byName: " BYNAME.", move: "MOVE", anchor: " ANCHOR", tail: " TAIL", bar: " BAR" };
+    const hintVerse = draftHint({ ...base, topic: { key: "продовж", verse: true }, tone: "rude", curses: () => "CURSES", lex: boom });
+    assert.ok(!hintVerse.includes("WHO") && !hintVerse.includes("BYNAME") && !hintVerse.includes(REPLY_TONES.rude) && hintVerse.includes("CURSES") && hintVerse.includes("MOVE ANCHOR TAIL BAR")); // rude is never picked for a verse, but if it were, no tone text
+    assert.equal(draftHint({ ...base, topic: { key: "продовж", verse: true }, tone: "wise", curses: boom, lex: boom }).trim(), "MOVE ANCHOR TAIL BAR");
+    const plain = draftHint({ ...base, topic: { key: "x", plain: true }, tone: "wise", curses: boom, lex: boom });
+    assert.ok(plain.includes("WHO. BYNAME.") && !plain.includes(REPLY_TONES.wise));
+    const normal = draftHint({ ...base, topic: null, tone: "wise", curses: boom, lex: () => "LEX" });
+    assert.ok(normal.startsWith(`WHO. BYNAME. ${REPLY_TONES.wise} `) && normal.includes("LEX MOVE ANCHOR TAIL BAR"));
+    assert.ok(draftHint({ ...base, topic: null, tone: "rude", curses: () => "CURSES", lex: () => "LEX" }).includes("CURSES LEX MOVE"));
+    assert.ok(!draftHint({ ...base, topic: null, tone: "wise", curses: boom, lex: boom, hints: false }).includes("LEX")); // hints off (/run?nohint=1): lex never asked
+    // the end of the chain
+    const led = finishReply("а шизік, знов дуріє", { fixed: "шизік", names: ["Оля"], to: "Оля" });
+    assert.ok(led.startsWith("Шизік. ") && led.match(/шизік/gi).length === 1); // the phrase leads, once
+    assert.equal(finishReply("а".repeat(900), { names: [], to: "Оля" }).length, 500);
+    assert.equal(finishReply("а".repeat(900), { names: [], to: "Оля", long: true }).length, 900);
+    assert.equal(finishReply("я".repeat(2000), { names: [], to: "Оля", long: true }).length, 1500);
+    assert.equal(replyOut("відповідь", true, "NAP"), LEAK_REPLY);
+    assert.equal(replyOut("відповідь", false, "NAP"), "відповідь");
+    assert.equal(replyOut("", false, "NAP"), "NAP");
+    assert.equal(replyOut(undefined, false, "NAP"), "NAP");
+    assert.equal(replyTarget({ to: "Ліда", name: "Оля", other: lida, messageId: 5 }), 77);
+    assert.equal(replyTarget({ to: "Оля", name: "Оля", other: lida, messageId: 5 }), 5);
+    assert.equal(replyTarget({ to: "Ліда", name: "Оля", other: null, messageId: 5 }), 5);
+    assert.equal(replyTarget({ messageId: 5, name: "Оля", other: null }), 5); // a failed chain has no "to"
+  }
   console.log("pipeline: самоперевірка ок");
 }

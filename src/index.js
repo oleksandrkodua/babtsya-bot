@@ -13,8 +13,8 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -320,19 +320,10 @@ const REPLY_TEMP = 1.2; // chosen 24.09.2026 from /run?kind=sample at 0.6–1.2:
 // other = the member the tagged message replies to ({ name, text, id }): "@бабця видай Олі пігулок" as a reply to
 // Nina is meant for Nina (25.09.2026) — the brief decides whom she answers.
 async function compose(env, name, raw, botText, temperature = REPLY_TEMP, context = "", other = null, draftsN = REPLY_DRAFTS, news = "", pic = "", hints = true) {
-  // A verse/rhyme request is never a fixed-phrase one: a verse that mentions "рудий" or a surname kept answering "шизік…" (08.10.2026).
-  const replied = Boolean(other?.text || botText), rule = isVerseCmd(raw) || bareVerseCmd(raw, replied) ? null : fixedFor(raw), fixed = rule?.text; // "@бабця + surname": the user's own answer
-  if (fixed && (rule.always || fixedIsBare(raw))) return { tone: "фраза", text: fixed }; // just the name (or Порошенко) — word for word
+  const plan = replyPlan(raw, { other, botText, news, hour: kyiv(new Date()).hour });
+  if (plan.stock) return plan.stock;
+  const { rule, fixed, topic, verse, rhymeWord, tone, shown } = plan;
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  // With more than the name the fixed phrase leads and the model carries on: "шизік, знов дуріє…" (26.09.2026).
-  const topic = fixed ? { key: "фраза+", hint: `Про цю людину в бабці одна думка — «${fixed}». Почни відповідь дослівно з «${fixed}» і розвинь далі по суті того, що спитали, українською, у стилі Подерв'янського.${rule.angles ? " Розвивай за напрямком із розбору (ПАМ'ЯТЬ і СУТЬ), своїми словами, не дослівно." : ""}` }
-    : bareVerseTopic(raw, replied) ?? replyTopic(raw, kyiv(new Date()).hour, other?.text, news); // "@бабця + word": a matching topic replaces the random move
-  // "Продовжи вірш" / "підбери риму" (08.10.2026): with no start or no word there is nothing to ask the model — a stock reply.
-  const verse = topic?.key === "продовж" ? verseStart(raw, other, botText) : null, rhymeWord = topic?.key === "рима" ? rhymeTarget(raw) : null;
-  if (topic?.key === "продовж" && !verse) return { tone: "фраза", text: pick(NO_START) };
-  if (topic?.key === "рима" && !rhymeWord) return { tone: "фраза", text: pick(NO_WORD) };
-  const shown = verse ? verseCommand(raw) : raw; // the start goes to the model once, in its own block, not again inside the ask
-  const tone = !["хороше", "рецепт", "вірш", "комплімент", "загадка", "підсумок", "кіно", "слово", "пісня", "продовж", "рима", "удар по Україні"].includes(topic?.key) && Math.random() < RUDE_SHARE ? "rude" : "wise"; // never rude for "good" or a recipe
   // Who in the conversation is a woman, so a mentioned member gets the right gender and case (25.09.2026).
   const gender = genderLine([name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean), femaleSet(env.FEMALE_NAMES));
   const present = new Set([name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])]);
@@ -344,7 +335,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   const known = noted.filter((r) => [name, other?.name].includes(displayName(r.name))).map((r) => `${displayName(r.name)}: ${r.notes}`).join("\n");
   const titles = [...parseAliases(env.TITLES)].filter(([n]) => present.has(n)).map(([n, f]) => `${n} — «${f.join(", ")}»`).join("; ");
   const talk = `${gender}${aka ? `ХТО Є ХТО (імена в житті): ${aka}.\n\n` : ""}${titles ? `ПІДПИСИ В ГРУПІ (жартівливі звання, можна підколоти): ${titles}.\n\n` : ""}${known ? `ЩО ДВІР ЗНАЄ ПРО НИХ (теми й жарти людини — для пункту ПАМ'ЯТЬ, не переказуй):\n${known}\n\n` : ""}${context ? `РОЗМОВА ПЕРЕД ЦИМ (лише щоб зрозуміти, про що мова):\n${context}\n\n` : ""}`;
-  const asked = `${name} пише: «${shown.slice(0, 500) || "(без тексту — гіфка, стікер чи фото)"}»${botText && !verse ? `\n(це відповідь на твоє: «${excerpt(botText, 300)}»)` : ""}${other && !verse ? `\n(це відповідь на повідомлення${other.name}: «${excerpt(other.text, 300)}»)` : ""}${news ? `\n(питання про пересланий допис ${news} — відповідай саме про цю новину)` : ""}${pic ? `\n(на фото: ${pic} — якщо питають, що це чи де це, відповідай саме про фото, конкретно)` : ""}${verse ? `\n(ПОЧАТОК, який треба продовжити:\n«${verse}»)` : ""}${rhymeWord ? `\n(слово, до якого шукають риму: «${rhymeWord}»)` : ""}`;
+  const asked = replyAsk({ name, shown, botText, other, news, pic, verse, rhymeWord });
   const start = Date.now();
   // 1. What's going on, what's asked, who's who ("тарас" is one man) — the drafts answer the brief, not raw lines.
   const local = replyPrompt.match(/^Місцеві слова:.*$/m)?.[0] ?? "";
@@ -359,11 +350,9 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   if (!brief && !topic?.verse) console.log(`Відповідь ${name}: розбір порожній — ${briefWhy}`);
   // ...nor the chat around it: for verse the prompt is her last replies, the ask with the start, and the topic hint.
   const ctx = topic?.verse ? "" : `${talk}${brief ? `РОЗБІР (для тебе, у відповідь не переписуй):\n${brief}\n\n` : ""}`;
-  const to = other && (other.forced || /Адресат:\s*ІНШ/i.test(brief)) ? other.name : name;
+  const to = replyAddressee(name, other, brief);
   const woman = isFemale(to, femaleSet(env.FEMALE_NAMES));
-  const who = `${to === name ? "Автор" : `Відповідай не автору, а ${to} — звертайся до ${woman ? "неї" : "нього"}. Адресат`} — ${woman ? "жінка: жіночий рід, «доню»" : "чоловік: чоловічий рід, «синку»"}.`;
-  const call = callName(parseAliases(env.ALIASES), to);
-  const byName = call ? ` Звертайся до ${woman ? "неї" : "нього"} дослівно «${call}» — саме в цій формі, не відмінюй і не міняй (раз), а не «${woman ? "доню" : "синку"}».` : "";
+  const { who, byName } = addressLines({ name, to, woman, call: callName(parseAliases(env.ALIASES), to) });
   const long = topic?.long; // a recipe needs room
   // 2. Same tone for all drafts (the rude/wise ratio holds), a different move each — that's the variety.
   // No random image any more (29.09.2026): "Порівняння бери з теми «каша / посилка / квитанція»" pulled a comparison
@@ -371,7 +360,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // repeats are kept away by her own last lines (said) instead.
   const mine = raw.replace(/@\w+/g, ""), chatText = bodies(context); // theme triggers see the ask and message bodies, never names or titles
   const draft = async (bar = "") => {
-    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${topic?.verse ? "" : `${who}${byName} ${topic?.plain ? "" : `${REPLY_TONES[tone]} `}`}${tone === "rude" ? cursesHint(CURSES, mine, chatText, past) + " " : ""}${hints && !topic?.verse && !topic?.plain ? lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }) : ""} ${topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone])}${verse ? verseAnchorHint(verse) : ""}${replyTail(topic, long)}${bar})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
+    const said = await ai(env, replyPrompt, `${past}${ctx}${asked}\n\n(Підказка лише для тебе, у відповідь її не переписуй: ${draftHint({ topic, hints, who, byName, tone, curses: () => cursesHint(CURSES, mine, chatText, past), lex: () => lexHint(BASES, { asked: mine, ctx: chatText, recent: past, topic: topic?.key }), move: topic ? pick([].concat(topic.hint)) : pick(REPLY_MOVES[tone]), anchor: verse ? verseAnchorHint(verse) : "", tail: replyTail(topic, long), bar })})`, topic?.temp ?? temperature, long ? 500 : 200, REPLY_PAUSE_MS, start + REPLY_WALLS.drafts);
     const out = said ? tidy(warFallback(stripHints(said.trim(), "").replace(/^[«"]+|[»"]+$/g, ""), raw)) : "";
     return verse ? verseTail(verse, out) ?? "" : rhymeWord ? rhymeTail(rhymeWord, out) ?? "" : out; // a failed verse draft is dropped
   };
@@ -397,9 +386,8 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // Same corrector as the plays: replies went straight out and "той розписка" got caught by the group (24.09.2026).
   // Verse and rhyme skip the model corrector: it swaps the last word of a line and breaks the rhyme (08.10.2026).
   text = applyFixes(text, topic?.verse ? "" : dedupLoop(await ai(env, polishPrompt, gender + text, 0.2, 300, REPLY_PAUSE_MS, start + REPLY_WALLS.polish)), { protectedTerms: [name, BOT_NAME] }).text;
-  if (fixed) text = leadFixed(text, fixed); // the phrase always leads, once
-  text = fixNames(text, [name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean));
-  return { tone: topic?.key || tone, text: dropName(text, to).slice(0, long ? 1500 : 500), brief, briefWhy, score, to };
+  text = finishReply(text, { fixed, names: [name, other?.name, ...context.split("\n").map((l) => l.split(": ")[0])].filter(Boolean), to, long }); // the fixed phrase always leads, once
+  return { tone: topic?.key || tone, text, brief, briefWhy, score, to };
 }
 
 // The picture itself: ~180 neurons, so with the day's budget gone (the "(N)" counter at 0) she says no, in her voice.
@@ -464,8 +452,8 @@ async function answer(env, msg, name, raw, botText, other = null, news = "", pho
   // Her own instructions never go out, whoever asked for them (30.09.2026).
   const leaked = said && leaks(said, [replyPrompt.replace(/^Місцеві слова:.*$/m, ""), BRIEF, JUDGE, verseJudge, polishPrompt]); // the glossary is meant to be quoted
   if (leaked) console.log(`Відповідь ${name}: схоже на її інструкції — замінено`);
-  const text = leaked ? "Шо ти мені тут вказуєш? Бабця сама знає, шо казати, а шо ні." : said || NAP[Math.floor(Math.random() * NAP.length)];
-  const replyTo = to && to !== name && other ? other.id : msg.message_id; // reply to the member she answers
+  const text = replyOut(said, leaked, NAP[Math.floor(Math.random() * NAP.length)]);
+  const replyTo = replyTarget({ to, name, other, messageId: msg.message_id });
   // "(5)": full replies the neurons still allow, plays kept (user, 04.10.2026); not remembered with the line.
   const count = await left(env).then((k) => ` (${k})`, () => "");
   await telegram(env, "sendMessage", { chat_id: msg.chat.id, text: text + count, reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } })
