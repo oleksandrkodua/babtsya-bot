@@ -466,12 +466,16 @@ async function pollText(env, day) {
 // Two drafts and a judge (29.09.2026: "Сусід так активно крутить педалі, шо повітря стискається сильніше, ніж його
 // плани…" — a comparison that goes nowhere). The judge wants one clear thought and a comparison that lands.
 const GRUMBLE_JUDGE = "Тобі дають кілька фраз бурчливої бабці для сусідського чату. Обери найкращу: у тему того, що ЗАРАЗ У ЧАТІ (якщо дано), логічна (одна думка, порівняння зрозуміле й доведене до кінця), смішна, у стилі Подерв'янського, чистою українською без русизмів («кабачке», «зенит» — погано), не схожа на ТВОЇ ОСТАННІ РЕПЛІКИ. Відповідай одним рядком: номер найкращої й оцінка 1–10, наприклад «2 8». Нічого більше.";
+// Сусід's phrases all rode the same three motifs (оперативка, велосипед, Виноградар) in the same form — 13.10.2026: a motif and a form are
+// drawn by code so two days in a row differ.
+const TULER_MOTIFS = ["оперативка чи нарада", "велосипед і дзвоник", "лосини", "Виноградар і довга дорога на роботу", "метро на Виноградар, якого нема", "робота з дому, «я на зв'язку»", "трудова книжка", "«буду за п'ять хвилин»"];
+const TULER_FORMS = ["питання до всього чату", "спогад бабці з вісімдесятих чи дев'яностих", "звіт ЖЕКу про Сусіда", "пророцтво на завтра", "коротка репліка, до 12 слів", "порівняння з побутом бабці"];
 async function newGrumble(env, section, list, clock = "", chat = "") {
   const now = chat ? `ЩО ЗАРАЗ У ЧАТІ (зачепися за одну конкретну тему звідси — предмет, подію чи суперечку; імен не називай):\n${chat}\n\n` : "";
   const past = await lately(env);
   const one = async () => {
     const examples = [...list].sort(() => Math.random() - 0.5).slice(0, 6).join("\n");
-    const said = await ai(env, grumblePrompt, `${past}${clock ? `Зараз ${clock} за Києвом — якщо згадуєш час, то лише цей.\n` : ""}${now}${grumbleHint(BASES, chat, past)}Тема: ${section}\nПриклади:\n${examples}`, 1.0, 120);
+    const said = await ai(env, grumblePrompt, `${past}${clock ? `Зараз ${clock} за Києвом — якщо згадуєш час, то лише цей.\n` : ""}${now}${grumbleHint(BASES, chat, past)}${section === "сусід" ? `Мотив: ${oneOf(TULER_MOTIFS)}. Форма: ${oneOf(TULER_FORMS)}. Не повторюй хід прикладів.\n` : ""}Тема: ${section}\nПриклади:\n${examples}`, 1.0, 120);
     const t = said ? tidy(warFallback(stripHints(said.trim().split("\n")[0], "").replace(/^[«"]+|[»"]+$/g, ""), "")) : "";
     // A copy of an example isn't new: better the file's phrase than a disguised repeat.
     return t.length >= 15 && !list.includes(t) ? t : "";
