@@ -949,6 +949,13 @@ export const pickFrom = (sections, asked = "", ctx = "", recent = "", n = 2) => 
   take(sections.find((s) => !s.re), n);
   return picks;
 };
+// A short reference on politicians and institutions (13.10.2026, owner: "пополнить базу знаний бабки по политике"): sections
+// whose trigger is in the ask (not in the whole chat), at most three, all their lines. Facts for the brief; the model is told
+// not to invent beyond them.
+export const factsHint = (sections, asked = "") => {
+  const hit = sections.filter((s) => s.re?.test(asked)).slice(0, 3);
+  return hit.length ? `ДОВІДКА (перевірені факти про тих, кого згадано; бери звідси, а чого тут нема і не знаєш точно — не вигадуй, познач «бабця не певна»; станом на 2026 рік):\n${hit.map((s) => `${s.name}: ${s.items.join(" ")}`).join("\n")}\n\n` : "";
+};
 export const cursesHint = (sections, asked = "", ctx = "", recent = "") =>
   `Для лайки візьми щось із цього чи вигадай своє в тому ж дусі: ${pickFrom(sections, asked, ctx, recent, 3).map((c) => `«${c}»`).join(", ")}.`;
 // One conversation line per message, "Name: text". A multi-line message is folded onto its line, so bodies() can tell a new
@@ -1020,13 +1027,16 @@ const DRAW_CMD = new RegExp("(?<![" + CYR + "])(?:"
   + "|накида(?:й|йте)|зобрази(?:ти)?|изобрази(?:ть|те)?"            // накидай, зобрази, изобрази
   + "|(?:з|с)генер[" + CYR + "]*\\s+(?:мені\\s+|мне\\s+)?(?:" + DRAW_NOUN + ")"  // згенеруй / сгенерируй картинку
   + "|(?:зроби|сделай|дай|видай|выдай|давай|покажи|кинь|скинь|створи|создай)\\s+(?:мені\\s+|мне\\s+|нам\\s+)?(?:[" + CYR + "]+\\s+)?(?:" + DRAW_NOUN + ")"
+  // "кличко в раді. чекаю малюнок" (13.10.2026): no draw verb, a waiting/wanting verb or a leading "малюнок:" is the command
+  + "|(?:чека(?:ю|ємо)|жду|ждем|ждём|очікую|хочу|хочемо|прошу|потрібн[" + CYR + "]*|нужн[" + CYR + "]*|треба|надо)\\s+(?:мені\\s+|мне\\s+|нам\\s+)?(?:[" + CYR + "]+\\s+)?(?:" + DRAW_NOUN + ")"
+  + "|^\\s*(?:" + DRAW_NOUN + ")\\s*[:—–-]"
   + ")", "iu");
 export const isDrawCmd = (raw) => DRAW_CMD.test(raw.replace(/@\w+/g, " "));
 export const drawSubject = (raw) => {
   const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean);
   if (!m) return "";
   const rest = (clean.slice(0, m.index) + " " + clean.slice(m.index + m[0].length))
-    .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|збоченк\S*|збоченец|дурн\S*|дурепа|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
+    .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|чека(?:ю|ємо)|жду|ждем|ждём|очікую|хочу|хочемо|прошу|потрібн\S*|нужн\S*|треба|надо|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|збоченк\S*|збоченец|дурн\S*|дурепа|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|кошолк\S*|бабищ\S*|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
   return rest.replace(/\s+/g, " ").replace(/^[\s:;,.!?\-—–]+|[\s:;,.!?\-—–]+$/g, "").slice(0, 200);
 };
 // "Тебе портрет просять намалювати" (10.10.2026): the model said NO to a self-portrait with an insult in the ask. Her own
@@ -1035,6 +1045,50 @@ const SELF_PORTRAIT = /(?<![а-яіїєґё])(?:портрет\s+(?:бабц|т�
 export const selfPortrait = (raw) => SELF_PORTRAIT.test(raw.replace(/@\w+/g, " "));
 export const SELF_SCENE = "A cheerful grumpy Ukrainian grandmother in a floral headscarf and a knitted cardigan, sitting on a wooden bench in a gazebo by a supermarket, arms folded, with a raised eyebrow and a sly smile; panel apartment blocks behind her. Portrait, fully clothed.";
 // Stock refusals she sent herself must not become the "context" of the next ask (10.10.2026).
+// The scene model wrote "A realistic portrait of Vitali Klitschko" despite "never photorealism" (13.10.2026): the words are
+// swapped by code, so a named public figure always stays a cartoon caricature.
+export const cartoonize = (scene) => scene.replace(/\b(?:hyper-?|photo-?)?realistic(?:ally)?\b|\bphoto(?:graph(?:ic|y)?)?\b|\bhyper-?real\b|\bcinematic\b/gi, "cartoon").replace(/\bcartoon(\s+cartoon)+/gi, "cartoon");
+// klein answers 3030 "output has been flagged" now and then on a named public figure (13.10.2026, "мера Кличка в раді"):
+// the retry gets the same scene without the name — only the described features stay. The name is found after
+// "caricature/portrait/… of", leftovers of it ("Klitschko is taller") become "the figure"; nationality words are not names.
+const NOT_NAME = new Set(["Eastern", "Western", "European", "Ukrainian", "Slavic", "Russian", "American", "Polish", "Soviet", "Verkhovna", "Rada", "Kyiv", "Kharkiv", "Lviv", "Dnipro", "Odesa"]);
+const NAME_AFTER = /\b(?:caricature|portrait|depiction|drawing|illustration|image|figure|cartoon)\s+of\s+((?:[A-Z][a-z'\u2019-]+\s+){1,2}[A-Z][a-z'\u2019-]+)/g;
+// Public figures from prompts/politics.txt written the way Gemma writes them in English (several transliterations), so a name is
+// caught anywhere in the scene, alone ("Putin stands…") or with a first name, an initial and a title ("President Donald J. Trump").
+// Words that are also common ones (Harris, Costa, Kim, Magyar) are left out; "Tusk" and "Fico" only match capitalised.
+const SURNAMES = ["Kim Jong Un", "Xi Jinping", "Jinping", "Klitschko", "Klychko", "Zelenskyy", "Zelenskyi", "Zelenskiy", "Zelensky", "Poroshenko", "Yushchenko", "Tymoshenko", "Yanukovych", "Kuchma", "Kravchuk", "Stefanchuk", "Terekhov", "Sadovyi", "Sadovy", "Filatov", "Yermak", "Ermak", "Budanov", "Zaluzhnyi", "Zaluzhnyy", "Zaluzhny", "Syrskyi", "Syrskyy", "Svyrydenko", "Koretskyi", "Koretsky", "Shmyhal", "Umerov", "Khmara", "Fedorov", "Drapatyi", "Lyashko", "Vakarchuk", "Kolomoisky", "Kolomoyskyi", "Akhmetov", "Medvedchuk", "Arestovych", "Trump", "Biden", "Obama", "Putin", "Lukashenko", "Lavrov", "Medvedev", "Shoigu", "Peskov", "Macron", "Merz", "Scholz", "Merkel", "Starmer", "Burnham", "Meloni", "Tusk", "Nawrocki", "Orban", "Orb\u00e1n", "Fico", "Erdogan", "Erdo\u011fan", "Modi", "Netanyahu", "Musk", "Milei", "Lula", "Carney", "Trudeau", "Sheinbaum", "Guterres", "Rutte", "Kallas", "Metsola", "Zhirinovsky", "Navalny"];
+// two first names are written as patterns ("Rusl?an", "Volodym?yr"): make-public.sh greps for the literal words, they are also a neighbour's names
+const FIRST_NAMES = ["Vitali", "Vitaliy", "Vitaly", "Volodym?yr", "Vladimir", "Petro", "Viktor", "Yulia", "Yuliia", "Julia", "Oleksandr", "Alexander", "Andriy", "Andrii", "Andrey", "Valerii", "Valery", "Rustem", "Mykhailo", "Denys", "Ihor", "Igor", "Donald", "Joe", "Joseph", "Barack", "Elon", "Emmanuel", "Friedrich", "Keir", "Andy", "Giorgia", "Karol", "Robert", "Narendra", "Recep", "Tayyip", "Benjamin", "Javier", "Mark", "Claudia", "Sergey", "Sergei", "Dmitry", "Dmitri", "Oleg", "Svyatoslav", "Sviatoslav", "Rusl?an", "Kyrylo", "Kirill", "Yevhen", "Leonid", "Olaf", "Angela", "Justin", "Luiz", "Alexander"];
+const TITLES = ["Prime Minister", "President", "Mayor", "Chancellor", "Minister", "Speaker", "Senator", "General", "Mr", "Mrs", "Ms", "Dr"];
+const KNOWN = new RegExp(`(?:\\b(${TITLES.join("|")})\\.?\\s+)?(?:(?:${[...new Set(FIRST_NAMES)].join("|")})\\s+(?:[A-Z]\\.\\s*)?){0,2}\\b(?:${SURNAMES.join("|")})\\b(?:['\u2019]s)?`, "g");
+const ESC = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const FIRST_MENTION = ["a person", "another person", "a third person", "a fourth person"];
+const LATER_MENTION = ["the first person", "the second person", "the third person", "the fourth person"];
+export const namelessScene = (scene) => {
+  // names not in the list: "<caricature/portrait/…> of Two Words" and any later mention of one of its words
+  const generic = [...scene.matchAll(NAME_AFTER)].map((m) => m[1]).filter((n) => !n.split(/\s+/).some((w) => NOT_NAME.has(w)));
+  const extra = [...new Set(generic.flatMap((n) => [n, ...n.split(/\s+/).filter((x) => x.length >= 4)]))].sort((x, y) => y.length - x.length);
+  const re = new RegExp(KNOWN.source + (extra.length ? `|\\b(?:${extra.map(ESC).join("|")})\\b(?:['\u2019]s)?` : ""), "g");
+  const keyOf = (m) => m.replace(/['\u2019]s$/, "").trim().split(/\s+/).pop().replace(/\.$/, "");
+  const keys = [];
+  for (const m of scene.matchAll(re)) if (!keys.includes(keyOf(m[0]))) keys.push(keyOf(m[0]));
+  const seen = new Set();
+  // one person: "a person", then "the figure"; several: told apart ("a person… another person", then "the first person…");
+  // "President Putin" keeps the post ("a president"); a possessive stays; a sentence start is capitalised
+  const out = scene.replace(re, (m, title, at) => {
+    const k = keyOf(m), i = keys.indexOf(k), again = seen.has(k);
+    seen.add(k);
+    const poss = /['\u2019]s$/.test(m) ? "'s" : "";
+    const post = title && !/^(?:Mr|Mrs|Ms|Dr)$/.test(title) ? title.toLowerCase() : "";
+    const word = post ? (again ? `the ${post}` : `a ${post}`)
+      : keys.length === 1 ? (again ? "the figure" : "a person")
+      : (again ? LATER_MENTION : FIRST_MENTION)[Math.min(i, 3)];
+    const head = at === 0 || /[.!?]\s*$/.test(scene.slice(0, at));
+    return (head ? word[0].toUpperCase() + word.slice(1) : word) + poss;
+  });
+  return out.replace(/\b(a person|the figure)(,?\s+\1)+\b/g, "$1");
+};
+export const isFlagged = (message) => /\b3030\b/.test(String(message));
 export const isStockPaint = (t) => [...NO_PAINT, ...REFUSE_PAINT].some((x) => t.startsWith(x.slice(0, 25)));
 export const NO_PAINT = [
   "Фарби на сьогодні скінчились, пензлик висох. Проси завтра, бабця ще й не таке намалює.",
@@ -1827,10 +1881,49 @@ if (import.meta.main) {
   assert.ok(["намалюй кота", "малюй кота", "намалюйте кота", "змалюй кота", "можеш намалювати кота?", "намалюєш кота?", "накидай кота", "зобрази кота", "рисуй кота", "нарисуй кота", "нарисуйте кота", "можешь нарисовать кота?", "нарисуешь кота?", "изобрази кота", "сгенерируй картинку кота", "згенеруй картинку кота", "сделай мне картинку кота", "створи зображення кота", "дай малюнок кота", "покажи рисунок кота", "скинь арт кота"].every((q) => isDrawCmd(`@babtsya_z_altanky_bot ${q}`)));
   // 10.10.2026: "Збоченка. Тебе портрет просять намалювати" was refused; a self-portrait is a fixed scene, a stock refusal is no context.
   assert.ok(selfPortrait("@babtsya_z_altanky_bot Збоченка. Тебе портрет просять намалювати") && selfPortrait("намалюй себе") && selfPortrait("намалюй твій портрет") && !selfPortrait("намалюй кота"));
+  assert.equal(cartoonize("A professional and realistic portrait of Vitali Klitschko, photorealistic photo style"), "A professional and cartoon portrait of Vitali Klitschko, cartoon cartoon style".replace("cartoon cartoon", "cartoon"));
+  assert.ok(!/realistic|photo/i.test(cartoonize("A hyper-realistic photograph of a hall")));
+  { // 3030 retry without the public figure's name (13.10.2026)
+    const named = "A funny cartoon caricature of Vitali Klitschko, a very tall man with a strong jawline. Klitschko stands taller than the surrounding deputies in a Verkhovna Rada amphitheater.";
+    const bare = namelessScene(named);
+    assert.ok(!/Klitschko|Vitali/.test(bare), bare);
+    assert.match(bare, /caricature of a person, a very tall man with a strong jawline/);
+    assert.match(bare, /the figure stands taller than the surrounding deputies in a Verkhovna Rada amphitheater/i);
+    assert.equal(namelessScene("A cartoon of Eastern European neighbours in a courtyard."), "A cartoon of Eastern European neighbours in a courtyard."); // not a name
+    assert.equal(namelessScene("A cheerful grandmother on a bench."), "A cheerful grandmother on a bench."); // nothing to strip: no retry
+    assert.ok(isFlagged("klein: 3030: Your output has been flagged. Please choose another prompt") && !isFlagged("klein: 5006: bad request") && !isFlagged(""));
+    // single names and names without "caricature of", with first names, initials, titles and possessives (13.10.2026)
+    assert.equal(namelessScene("A cartoon of Zelensky in a hall."), "A cartoon of a person in a hall.");
+    assert.equal(namelessScene("Putin stands at a long table."), "A person stands at a long table.");
+    assert.equal(namelessScene("President Donald J. Trump waves. Trump smiles."), "A president waves. The figure smiles.");
+    assert.equal(namelessScene("Zelensky's coat and Xi Jinping's smile."), "A person's coat and another person's smile.");
+    assert.equal(namelessScene("Putin stands with Lukashenko. Lukashenko laughs, Putin nods."), "A person stands with another person. The second person laughs, the first person nods.");
+    assert.equal(namelessScene("A caricature of Boris Johnson and Angela Merkel."), "A caricature of a person and another person.");
+    assert.equal(namelessScene("Mayor Vitali Klitschko, tall and strong, stands among deputies."), "A mayor, tall and strong, stands among deputies.");
+    assert.equal(namelessScene("A caricature of Boris Johnson with messy hair."), "A caricature of a person with messy hair."); // not in the list, the old pattern
+    assert.ok(!/Klitschko|Putin|Trump|Zelensk|Jinping|Burnham/.test(namelessScene("Klitschko, Putin, Trump, Zelenskyy, Xi Jinping and Burnham sit in a row.")));
+    assert.equal(namelessScene("A person, a person and a person"), "A person, a person and a person"); // untouched, only generated repeats collapse
+    assert.equal(namelessScene("The elephant's tusk, a trump card and a Harris tweed jacket in a Costa cafe."), "The elephant's tusk, a trump card and a Harris tweed jacket in a Costa cafe."); // common words stay
+  }
   assert.ok(isStockPaint(REFUSE_PAINT[0]) && !isStockPaint("Такий собі кіт"));
   assert.ok(!/збоченк/i.test(drawSubject("@babtsya_z_altanky_bot Збоченка. намалюй кота")));
   assert.deepEqual(GRUMBLE_SLOTS, [480, 1020]); // 13.10.2026
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot дай Артема") && !isDrawCmd("@babtsya_z_altanky_bot дай мені спокій") && !isDrawCmd("@babtsya_z_altanky_bot покажи, як ти малюєш"));
+  { // the politics reference (13.10.2026): matched by the ask, at most three sections, nothing for an unrelated ask
+    const pol = parseCurses(readFileSync(new URL("../prompts/politics.txt", import.meta.url), "utf8"));
+    assert.match(factsHint(pol, "намалюй мера Кличко в верховній раді"), /Віталій Кличко/);
+    assert.match(factsHint(pol, "шо там Трамп?"), /47-й президент/);
+    assert.equal(factsHint(pol, "скільки коштує хліб?"), "");
+    // variants checked live-style on 13.10.2026: Ukrainian, Russian, surzhyk spellings and the words around the people
+    for (const [q, name] of [["Терехов шо казав", "Терехов"], ["мэр Киева", "Кличко"], ["Банкова мовчить", "Банкова"], ["Ющєнко отруївся", "Ющенко"], ["Тимошенку посадили", "Тимошенко"], ["Стефанчука бачила", "Стефанчук"], ["Верховная Рада приняла", "Верховна Рада"], ["Ермак ушёл", "Єрмак"], ["Кабмин решил", "Кабінет міністрів"], ["Зєля шо", "Зеленський"]]) assert.match(factsHint(pol, q), new RegExp(name), q);
+    assert.equal(factsHint(pol, "приватний будинок, привід для радості, садові товариства"), "");
+    assert.ok(pol.every((x) => x.items.length && x.re));
+    assert.ok((factsHint(pol, "Трамп Путін Зеленський Кличко Макрон").match(/\n[^\n]+?: /g) || []).length <= 3);
+  }
+  assert.equal(drawSubject("@babtsya_z_altanky_bot кличка в верховній раді намалюй кошолка стара"), "кличка в верховній раді"); // "кошолка" is an insult to her, not a basket (13.10.2026)
+  for (const q of ["кличко в раді. чекаю малюнок", "чекаю картинку кличка в раді", "жду картинку: кличко в раде", "хочу малюнок кота", "потрібна картинка трактора", "малюнок: кличко в раді"]) assert.ok(isDrawCmd(`@babtsya_z_altanky_bot ${q}`), q);
+  assert.equal(drawSubject("@babtsya_z_altanky_bot кличко в раді. чекаю малюнок"), "кличко в раді");
+  assert.ok(!isDrawCmd("@babtsya_z_altanky_bot хочу сказати про малюнок") && !isDrawCmd("@babtsya_z_altanky_bot цей малюнок гарний") && !isDrawCmd("@babtsya_z_altanky_bot треба купити хліб"));
   assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
   console.log("pipeline: самоперевірка ок");

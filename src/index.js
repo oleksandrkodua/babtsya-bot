@@ -8,12 +8,13 @@ import grumblePrompt from "../prompts/grumble.txt";
 import verseJudge from "../prompts/verse-judge.txt";
 import cursesText from "../prompts/curses.txt";
 import lexiconText from "../prompts/lexicon.txt";
+import politicsText from "../prompts/politics.txt";
 import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
   BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, leadFixed, aliasSpeakers, callName, misattributed, plainMoral, fixedIsBare, fixedFor, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
+  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, dropName, tidy, mentionPrefix, REPLY_MOVES, REPLY_TONES, RUDE_SHARE, cursesHint, lexHint, grumbleHint, verseStart, verseTail, bareVerseCmd, bareVerseTopic, verseAnchorHint, rhymeTarget, rhymeTail, rhymeFirst, isVerseCmd, verseCommand, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, NO_START, NO_WORD, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, replyTopic, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts,
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -23,6 +24,7 @@ const MIDDAY_MIN = 50; // midday runs only at 13:00 Kyiv (24.09.2026: a 15:30 su
 const EVENING_MIN = 50; // below it the evening is skipped and messages roll into the next digest
 const GRUMBLES = parseGrumbles(grumblesText);
 const CURSES = parseCurses(cursesText);
+const POLITICS = parseCurses(politicsText);
 const BASES = { lexicon: parseCurses(lexiconText), openers: parseCurses(openersText), closers: parseCurses(closersText), blessings: parseCurses(blessingsText) };
 const COPY_MAX = 2; // more copied replicas than this → one rewrite call (25.09.2026)
 // Second corrector pass on plays only: the first one kept missing agreement and the vocative (25.09.2026).
@@ -56,8 +58,14 @@ const POSTER = "Ти пишеш опис картинки-афіші до п'є�
 // Style goes first: FLUX weighs the start of the prompt most, and a trailing "gouache poster" came out as a dark photo (25.09.2026).
 // People came out East Asian-looking (29.09.2026): neighbours are Eastern Europeans, without folklore overload.
 // A picture on request (09.10.2026, "@бабця намалюй хропіллу картинкою"): Gemma turns the ask into an English scene, or NO.
-const PAINT = "Ти пишеш опис картинки для генератора зображень за проханням із чату. Тобі дають прохання й, можливо, контекст (опис того, що просять намалювати). Опиши АНГЛІЙСЬКОЮ одним-двома реченнями, що намалювати: головний предмет у центрі, його вигляд (бери з контексту, якщо там є опис), фон. Вигадані істоти й предмети малюй як описано. Весело, без тексту й літер на картинці. Якщо просять портрет самої бабці (того, хто відповідає) — малюй добру бурчливу бабцю в хустці. Імена сусідів із чату («Коля», «Олександр») — це друзі: НЕ відмовляй, а малюй безлику мультяшну постать у звичайному одязі без конкретних рис і без імені; число чи незрозуміле слово («33») подай як смішний предмет або кількість предметів (33 — штрафна банка, 33 грн), а якщо зовсім незрозуміло — вигадай веселу сцену з двору. Відповідай NO лише якщо просять портрет відомої реальної людини (політик, зірка), оголене тіло, насильство, зброю, війну, розправу чи приниження за національністю, вірою, статтю чи зовнішністю — відповідай одним словом NO. Звертання до бабці й лайка чи образи на її адресу («стара», «карга», «ти», «збоченка», «дурна») — не причина відмовляти й не частина того, що малювати: ігноруй їх. Усі люди й істоти на картинці повністю одягнені, без оголеного тіла. Лише опис англійською або NO, нічого більше.";
-const POSTER_STYLE = "Bright naive folk-art illustration, flat vivid colors, thick outlines, humorous cartoon, cheerful warm light. Characters are ordinary Eastern European (Ukrainian) neighbours with Slavic European features in everyday modern clothes, no national costumes, no flags. ";
+const PAINT = "Ти пишеш опис картинки для генератора зображень за проханням із чату. Тобі дають прохання й, можливо, контекст (опис того, що просять намалювати). Опиши АНГЛІЙСЬКОЮ одним-двома реченнями, що намалювати: головний предмет у центрі, його вигляд (бери з контексту, якщо там є опис), фон. Вигадані істоти й предмети малюй як описано. Якщо сцена в парламенті, уряді чи офісі — усі присутні дорослі ділові люди в костюмах і піджаках (чоловіки й жінки, серйозні, середнього й старшого віку), не діти, не школярі, не сусіди в футболках. Весело, без тексту й літер на картинці, без гербів, прапорів і державних символів (модель малює двоголового орла). Якщо просять портрет самої бабці (того, хто відповідає) — малюй добру бурчливу бабцю в хустці. Імена сусідів із чату («Коля», «Олександр») — це друзі: НЕ відмовляй, а малюй типового мультяшного героя з простим веселим обличчям (очі, ніс, усмішка — як у дитячій книжці) у звичайному одязі без конкретних рис і без імені; число чи незрозуміле слово («33») подай як смішний предмет або кількість предметів (33 — штрафна банка, 33 грн), а якщо зовсім незрозуміло — вигадай веселу сцену з двору. Публічні особи (політик, мер), яких названо в проханні чи ДОВІДЦІ повним іменем, — НЕ привід для відмови (13.10.2026, власник: «лицо реального человека по запросу можно»): малюй їх як веселу КАРИКАТУРУ в мультяшному стилі, назви англійською повним іменем (Vitali Klitschko) і опиши впізнавані риси (зачіска, вік, статура, типовий одяг), у потрібному місці. Лише мультфільм чи ілюстрація, НІКОЛИ фотореалізм; без принижень, зневаги, оголеного тіла, насильства, крові, кримінальних чи вигаданих компрометуючих сцен, без написів і гербів. Якщо в завданні імені нема (сусід із чату, «мер», «політик» без імені) — типовий мультяшний герой за роллю й одягом із простим веселим обличчям (є очі, ніс, рот). Слів «faceless», «без обличчя» в описі не вживай. Відповідай NO лише якщо просять оголене тіло, насильство, зброю, війну, розправу чи приниження за національністю, вірою, статтю чи зовнішністю — відповідай одним словом NO. Звертання до бабці й лайка чи образи на її адресу («стара», «карга», «кошолка», «ти», «збоченка», «дурна» — навіть якщо слово схоже на предмет) — не причина відмовляти й не частина того, що малювати: ігноруй їх. Усі люди й істоти на картинці повністю одягнені, без оголеного тіла. Якщо дано ДОВІДКУ — бери з неї вигляд місця, людей і публічних осіб. ОДНА сцена в одному кадрі, не колаж і не кілька картинок поруч. Лише опис англійською або NO, нічого більше.";
+// Three passes before FLUX (13.10.2026, "щось схоже намалювати щоб Коля з вайберу не таскав" under a greeting card: she
+// never looked at the card and drew a generic family). 1) INTENT restates the ask in Ukrainian with "схоже/таке/як це"
+// resolved against the photo description; 2) PAINT turns it into an English scene; 3) CHECK compares the scene with the
+// intent and rewrites it if a key element is missing. Each is a tiny Gemma call next to the ~105-neuron picture.
+const INTENT = "Ти редактор прохань до художника. Тобі дають прохання з чату, можливо опис фото чи текст допису, на який відповіли («схоже», «таке саме», «як це» — це про нього), і що писали раніше. Перепиши прохання як чітке завдання для художника українською, 1–2 короткі речення (до 45 слів): що саме намалювати (головний предмет і його вигляд), у якому стилі й настрої (візьми з опису фото, якщо просять «схоже»), які деталі обов'язкові. Мету жарту чи прохання («щоб Коля не таскав») не малюй буквально — передай як веселу ситуацію, смішний предмет чи напис-ідею без тексту. Імена сусідів із чату — типовий мультяшний герой з простим веселим обличчям, без імені. Публічну особу (політик, мер) називай повним іменем ЛИШЕ якщо вона є у ДОВІДЦІ; хто не в ДОВІДЦІ — типовий герой за роллю й одягом. Нічого принизливого, голого чи насильницького про публічних людей у завданні нема. Звертання й образи до самої бабці («стара», «кошолка», «карга») — не частина завдання, викинь їх. Прохання пишуть із помилками й суржиком («кличка» — це Кличко). Якщо дано ДОВІДКУ, бери з неї, як виглядає місце чи роль. Не відмовляй і не оцінюй. Лише завдання, нічого більше.";
+const CHECK = "Ти перевіряєш опис картинки. Тобі дають ЗАВДАННЯ (українською) і СЦЕНУ (англійською, для генератора зображень). Якщо сцена передає головний предмет, стиль і настрій із завдання — відповідай одним словом OK. Інакше перепиши сцену англійською в 1–2 речення так, щоб вона відповідала завданню; одна сцена в одному кадрі, без колажу, без тексту й літер на картинці, усі люди одягнені. Лише OK або нова сцена, нічого більше.";
+const POSTER_STYLE = "One single bright naive folk-art illustration (not a collage, no split panels, never a realistic photo or portrait), flat vivid colors, thick outlines, humorous cartoon, cheerful warm light. Characters are ordinary Eastern European (Ukrainian) people with Slavic European features, dressed as the scene requires (everyday clothes in a courtyard, formal business suits in an office or parliament), no national costumes, no flags, no coats of arms, no emblems, no eagles, no state symbols of any country. ";
 // klein (29.09.2026) wrote "SUPRMARET" on a fridge and a fake "@signature" in the corner: every kind of lettering named.
 const NO_TEXT = " Absolutely no text anywhere: no letters, words, labels, brand names, logos, signs, captions, signature or watermark.";
 const POSTER_END = NO_TEXT;
@@ -99,6 +107,13 @@ export default {
         });
         const missing = names.filter((n) => !people.some((p) => p.name === n));
         return new Response(`say: ${prefix.text}${text}${missing.length ? `\nбез тегу (ще не писали після оновлення): ${missing.join(", ")}` : ""}`);
+      }
+      // ?kind=paint&text=«@babtsya_z_altanky_bot кличко в раді. чекаю малюнок» — the picture path as in the chat, to your private chat only (13.10.2026).
+      if (kind === "paint") {
+        const raw = url.searchParams.get("text") || "";
+        if (!isDrawCmd(raw)) return new Response(`НЕ розпізнано як прохання намалювати: «${raw}» (піде в текстову відповідь)`);
+        const r = await paint(env, { chat: { id: env.TEST_CHAT_ID }, message_id: 0 }, "Ivan M", raw, "", null, "").catch((e) => `ЗБІЙ: ${e.stack || e.message}`);
+        return new Response(`розпізнано як малюнок; тема: «${drawSubject(raw)}»\n${r || "—"} [${lastDraw}]`);
       }
       // ?kind=reply&text=…[&name=…][&news=«канал»: «текст допису»][&nohint=1: without the lexicon hint, to compare] — one live-like reply, sent to your private chat; the
       // answer, brief, score and any error come back here (30.09.2026: news replies failed and the logs weren't at hand).
@@ -339,7 +354,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   const angle = rule?.angles ? pick(rule.angles.split(";").map((a) => a.trim())) : "";
   const opinion = fixed ? `\n(бабцина думка про цю людину: «${fixed}»${angle ? `; цього разу зачепися за: ${angle} — або придумай свій кут у цьому дусі` : ""})` : "";
   // Verse and rhyme need no brief: its "who is addressed / funny angle" invited a comment before the verse (live, 08.10.2026).
-  const brief = topic?.verse ? "" : (await ai(env, `${BRIEF}\n${local}`, `${await memory(env)}${talk}${asked}${opinion}`, 0.2, 400, REPLY_PAUSE_MS, start + REPLY_WALLS.brief)).trim();
+  const brief = topic?.verse ? "" : (await ai(env, `${BRIEF}\n${local}`, `${await memory(env)}${talk}${factsHint(POLITICS, `${raw.replace(/@\w+/g, " ")} ${other?.text || ""} ${news}`)}${asked}${opinion}`, 0.2, 400, REPLY_PAUSE_MS, start + REPLY_WALLS.brief)).trim();
   const briefWhy = brief ? "" : lastAi || "порожній текст"; // /run?kind=reply shows why the brief came back empty
   if (!brief && !topic?.verse) console.log(`Відповідь ${name}: розбір порожній — ${briefWhy}`);
   // ...nor the chat around it: for verse the prompt is her last replies, the ask with the start, and the topic hint.
@@ -388,19 +403,45 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
 }
 
 // The picture itself: ~180 neurons, so with the day's budget gone (the "(N)" counter at 0) she says no, in her voice.
-async function paint(env, msg, name, raw, botText, other) {
+async function paint(env, msg, name, raw, botText, other, pic = "") {
   const send = (text) => telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
-  if ((await left(env).catch(() => 1)) === 0) return send(oneOf(NO_PAINT)).then(() => console.log(`Малюнок ${name}: немає нейронів`));
+  if ((await left(env).catch(() => 1)) === 0) return send(oneOf(NO_PAINT)).then(() => (console.log(`Малюнок ${name}: немає нейронів`), "немає нейронів"));
   const subject = drawSubject(raw), self = selfPortrait(raw);
-  const ctx = [botText, other?.text].find((t) => t && !isStockPaint(t)) || "";
-  if (!subject && !ctx && !self) return send("Шо малювати, га? Скажи, шо саме.");
-  const scene = self ? SELF_SCENE : (await ai(env, PAINT, `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${ctx ? `\nКонтекст: ${excerpt(ctx, 400)}` : ""}`, 0.7, 150)).trim();
-  if (/^NO\b/i.test(scene)) return send(oneOf(REFUSE_PAINT)).then(() => console.log(`Малюнок ${name}: відмова — ${subject}`));
-  const jpeg = scene ? await draw(env, POSTER_STYLE + scene + POSTER_END) : null;
-  if (!jpeg) return send(NAP[Math.floor(Math.random() * NAP.length)]).then(() => console.log(`Малюнок ${name}: без картинки [${lastDraw}]`));
+  // An earlier "намалюй …" is a request, not a description: replying to it with "щось людське" drew both (13.10.2026).
+  const ctx = [botText, other?.text].find((t) => t && !isStockPaint(t) && !isDrawCmd(t)) || "";
+  if (!subject && !ctx && !pic && !self) return send("Шо малювати, га? Скажи, шо саме.").then(() => "нічого малювати");
+  // The background task dies ~30 s after the webhook answers and ai() sleeps 20 s between retries by default: the three
+  // passes got deadlines and a short pause (13.10.2026, "друкує…" and then nothing), each falls back to the raw ask.
+  const t0 = Date.now();
+  let scene = SELF_SCENE, intent = "";
+  if (!self) {
+    // 36 s for one picture (13.10.2026) is past the 30 s the background task lives: INTENT only when there is something to
+    // resolve ("схоже" under a photo or a post); a plain ask goes to PAINT with the reference attached.
+    const facts = factsHint(POLITICS, `${subject} ${ctx}`);
+    let given = `Прохання: ${subject}\n${facts}`;
+    if (pic || ctx) {
+      const ask = `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${pic ? `\nНа фото, на яке відповіли: ${excerpt(pic, 500)}` : ""}${ctx ? `\nТекст допису: ${excerpt(ctx, 400)}` : ""}\n${facts}`;
+      intent = (await ai(env, INTENT, ask, 0.3, 130, 1500, t0 + 8000)).trim() || subject || excerpt(ctx, 200); // a failed pass falls back to the raw ask
+      given = `Прохання: ${intent}`;
+    } else intent = subject;
+    scene = (await ai(env, PAINT, given, 0.7, 120, 1500, t0 + 13000)).trim();
+    // An empty scene sent her back to sleep on the bench (13.10.2026, 13:40): one more try on the raw ask, which is shorter and quicker.
+    if (!scene) scene = (await ai(env, PAINT, `Прохання: ${subject || excerpt(ctx, 200)}`, 0.7, 120, 1500, t0 + 18000)).trim();
+    // One NO is a coin flip on a boxer or a hall (13.10.2026, "мера Кличка в верховній раді"): she refuses only if it says NO twice.
+    if (/^NO\b/i.test(scene)) scene = (await ai(env, PAINT, given, 0.9, 120, 1500, t0 + 16000)).trim();
+    if (scene && !/^NO\b/i.test(scene)) {
+      const fixed = Date.now() - t0 > 8000 ? "" : (await ai(env, CHECK, `ЗАВДАННЯ: ${intent}\nСЦЕНА: ${scene}`, 0.2, 120, 1500, t0 + 16000)).trim(); // the picture still needs ~8 s of the 30
+      if (fixed && !/^OK\b/i.test(fixed) && !/^NO\b/i.test(fixed)) scene = fixed;
+    }
+  }
+  if (/^NO\b/i.test(scene)) return send(oneOf(REFUSE_PAINT)).then(() => (console.log(`Малюнок ${name}: відмова — ${subject}`), `відмова (NO двічі)\nзавдання: ${intent || "—"}`));
+  const cartoon = cartoonize(scene), bare = namelessScene(cartoon);
+  const jpeg = scene ? await draw(env, POSTER_STYLE + cartoon + POSTER_END, bare === cartoon ? "" : POSTER_STYLE + bare + POSTER_END) : null; // no name → no retry
+  if (!jpeg) return send(NAP[Math.floor(Math.random() * NAP.length)]).then(() => (console.log(`Малюнок ${name}: без картинки [${lastDraw}]`), `без картинки (${Date.now() - t0} мс; ШІ: ${lastAi || "—"}; малюнок: ${lastDraw || "—"})\nзавдання: ${intent || "—"}\nсцена: ${scene || "порожня"}`));
   const count = await left(env).then((k) => ` (${k})`, () => "");
   await sendPhoto(env, msg.chat.id, jpeg, oneOf(PAINT_CAPS) + count, msg.message_id);
-  console.log(`Малюнок ${name}: ${scene}`);
+  console.log(`Малюнок ${name}: ${intent ? `[${intent}] ` : ""}${scene}`);
+  return `${Date.now() - t0} мс\nзавдання: ${intent || "—"}\nсцена: ${scene}`;
 }
 
 async function answer(env, msg, name, raw, botText, other = null, news = "", photo = "") {
@@ -412,7 +453,7 @@ async function answer(env, msg, name, raw, botText, other = null, news = "", pho
   const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: isDrawCmd(raw) ? "upload_photo" : "typing" }).catch(() => {});
   typing();
   const tick = setInterval(typing, 4500);
-  if (isDrawCmd(raw)) return paint(env, msg, name, raw, botText, other).catch((e) => console.log(`Малюнок ${name}: збій — ${e.stack || e.message}`)).finally(() => clearInterval(tick));
+  if (isDrawCmd(raw)) return (photo && !selfPortrait(raw) ? look(env, photo) : Promise.resolve("")).then((pic) => paint(env, msg, name, raw, botText, other, pic)).catch((e) => (console.log(`Малюнок ${name}: збій — ${e.stack || e.message}`), telegram(env, "sendMessage", { chat_id: msg.chat.id, text: NAP[Math.floor(Math.random() * NAP.length)], reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } }).catch(() => {}))).finally(() => clearInterval(tick));
   const lean = (await left(env).catch(() => 1)) === 0; // no spend table yet → full replies
   const pic = photo ? await look(env, photo) : "";
   if (photo) console.log(`Фото для ${name}: ${pic || "не розгледіла"}`);
@@ -690,17 +731,33 @@ async function chronicle(env) {
 
 // A picture as base64 JPEG, or null — a failed picture never blocks the text it goes with.
 let lastDraw = "—"; // which model drew the last picture — shown in /run answers
-async function draw64(env, prompt) {
+const klein = async (env, prompt) => {
+  const form = new FormData();
+  for (const [k, v] of Object.entries({ prompt, width: "1024", height: "1024" })) form.append(k, v);
+  const req = new Request("https://form", { method: "POST", body: form });
+  return (await env.AI.run(IMAGE_MODEL, { multipart: { body: req.body, contentType: req.headers.get("content-type") } }))?.image;
+};
+// `alt` is the same prompt without a public figure's name: klein is retried once with it after a 3030 "flagged" (13.10.2026),
+// and schnell gets it too, the flagged text is not sent again.
+async function draw64(env, prompt, alt = "") {
   try {
-    const form = new FormData();
-    for (const [k, v] of Object.entries({ prompt, width: "1024", height: "1024" })) form.append(k, v);
-    const req = new Request("https://form", { method: "POST", body: form });
-    const img = (await env.AI.run(IMAGE_MODEL, { multipart: { body: req.body, contentType: req.headers.get("content-type") } }))?.image;
+    const img = await klein(env, prompt);
     if (img) { lastDraw = "klein"; await spend(env, PIC_NEURONS); return img; }
     lastDraw = "klein: порожньо";
   } catch (e) {
     console.log("draw klein:", e.message);
     lastDraw = `klein: ${e.message}`;
+    if (alt && isFlagged(e.message)) {
+      try {
+        const img = await klein(env, alt);
+        if (img) { lastDraw = "klein (без імені після 3030)"; await spend(env, PIC_NEURONS); return img; }
+        lastDraw += "; повтор без імені: порожньо";
+      } catch (e2) {
+        console.log("draw klein (без імені):", e2.message);
+        lastDraw += `; повтор без імені: ${e2.message}`;
+      }
+      prompt = alt;
+    }
   }
   try {
     lastDraw = `schnell (запасний; ${lastDraw})`;
@@ -713,8 +770,8 @@ async function draw64(env, prompt) {
   }
 }
 const jpegBytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-const draw = async (env, prompt) => {
-  const b64 = await draw64(env, prompt);
+const draw = async (env, prompt, alt = "") => {
+  const b64 = await draw64(env, prompt, alt);
   return b64 ? jpegBytes(b64) : null;
 };
 
