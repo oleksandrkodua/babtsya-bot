@@ -107,26 +107,41 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
 // ponytail: stem-in-chat heuristic — a metaphor slips through on a day a member wrote the same word.
 export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []).map((w) => w.toLowerCase()))].filter((w) => !chat.toLowerCase().includes(w));
 
-// Grumbles (user, 13.10.2026): 08:00 (the morning one), then silence until the 13:00 play and till 15:00, then ONE grumble
-// at 17:00. Every day also has exactly one random extra, a half-hour tick 15:00–19:30 off the grumble: odd days — the Lida
-// tease with a meat picture, even days alternate Сусід's phrase and a GIF from the owner's stock. The tick comes from the date
-// itself, so there's nothing to store and a retried cron can't post it twice. (Was every 3.5 h till 13.10, every 2 h till 10.10.)
+// Grumbles (user, 13.10.2026, second round): the 08:00 morning one, silence till the 13:00 play and till 15:00, then ONE grumble
+// at a random half hour 15:00–19:00; and exactly one random phrase a day in the same window — Lida's tease with a meat picture
+// on odd days, Сусід's phrase on even ones (the GIFs are manual only now). The ticks come from the date itself, so there's
+// nothing to store; scheduled() also claims every tick in D1, so a second cron delivery can't post it twice (13.10: two
+// grumbles at 17:00 and 17:01). (Was a fixed 17:00 grumble till 13.10, every 3.5 h till then, every 2 h till 10.10.)
 // 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
 // ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 22:30, then the evening play; the poll is sent by hand
 // (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
 export const ONE_OFF = { day: "2026-09-30", quietUntil: 22 * 60 + 30, evening: 22 * 60 + 30 }; // minutes of the day
 export const oneOff = (day) => (day === ONE_OFF.day ? ONE_OFF : null);
-export const GRUMBLE_SLOTS = [480, 1020];
+export const GRUMBLE_SLOTS = [480]; // the fixed one; the afternoon one is grumbleMinute(day)
 export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00
 const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tune on the real group
-const EXTRA_TICKS = Array.from({ length: 10 }, (_, i) => 900 + i * 30).filter((m) => !GRUMBLE_SLOTS.includes(m));
+const WINDOW = Array.from({ length: 9 }, (_, i) => 900 + i * 30); // 15:00–19:00
 const dayNo = (day) => Date.parse(day) / 864e5;
-const extraKind = (day) => { const d = dayNo(day); return d % 2 === 1 ? "підколка" : (d / 2) % 2 === 0 ? "сусід" : "гіфка"; };
-const extraMinute = (day, kind) => (extraKind(day) === kind ? EXTRA_TICKS[(dayNo(day) * 7) % EXTRA_TICKS.length] : null);
-export const teaseMinute = (day) => extraMinute(day, "підколка");
-export const gifMinute = (day) => extraMinute(day, "гіфка");
-export const neighbourMinute = (day) => extraMinute(day, "сусід");
+const phraseKind = (day) => (dayNo(day) % 2 === 1 ? "підколка" : "сусід");
+const phraseMinute = (day, kind) => (phraseKind(day) === kind ? WINDOW[(dayNo(day) * 7) % WINDOW.length] : null);
+export const teaseMinute = (day) => phraseMinute(day, "підколка");
+export const neighbourMinute = (day) => phraseMinute(day, "сусід");
+// The afternoon grumble: any window tick but the phrase's.
+export const grumbleMinute = (day) => { const free = WINDOW.filter((m) => m !== (teaseMinute(day) ?? neighbourMinute(day))); return free[(dayNo(day) * 5 + 3) % free.length]; };
 
+// One run per key (13.10.2026: two grumbles at 17:00 and 17:01, doubled pictures — a cron tick or a webhook delivered twice).
+// The first run to insert the key wins; fails open, so a missing `ticks` table can't silence the bot. Old keys go with it.
+export async function claim(db, key, now = Date.now()) {
+  const ts = Math.floor(now / 1000);
+  try {
+    const r = await db.prepare("INSERT OR IGNORE INTO ticks (key, ts) VALUES (?, ?)").bind(key, ts).run();
+    await db.prepare("DELETE FROM ticks WHERE ts < ?").bind(ts - 3 * 86400).run();
+    return r.meta.changes > 0;
+  } catch (e) {
+    console.log("claim:", e.message);
+    return true;
+  }
+}
 // What the cron owes at a Kyiv day and minute of the day — the one schedule, read by scheduled() and by plan.mjs
 // (30.09.2026: a hand-copied plan.mjs would drift). Runtime guards (≥50 messages, already done, stock size, TEASE set,
 // no grumble right under a play) stay in scheduled().
@@ -140,10 +155,9 @@ export function due(day, m) {
   if (m === MIDDAY_MINUTE) out.push("денна п'єса");
   if (hour >= 22 && !o) out.push("закрити опитування");
   if (m >= (o?.evening ?? 22 * 60)) out.push("вечірня п'єса");
-  if (GRUMBLE_SLOTS.includes(m)) out.push("бурчання");
+  if (GRUMBLE_SLOTS.includes(m) || m === grumbleMinute(day)) out.push("бурчання");
   if (m === neighbourMinute(day)) out.push("сусід");
   if (m === teaseMinute(day)) out.push("підколка");
-  if (m === gifMinute(day)) out.push("гіфка");
   if (m === POLL_MINUTE) out.push("опитування");
   return out;
 }
@@ -566,7 +580,8 @@ const WAR_FALLBACK = [
 // 11.10.2026 (user's newlogic.md): "абсурд", "парадокс" and the opener "Ім'я, твоє X - це …" (both 10.10 screenshots start so) are tics too.
 // 10.10.2026: "це така велична й безглузда метафізика, як намагання …" (2 of 2 screenshots): "як намагання", the "така X і Y" pair and the word "метафізика" are tics too.
 const TICS = [/(?<![\p{L}])пафос/iu, /ніби ти тут/iu, /на деле(?![\p{L}])/iu, /завтра\s+(?:на|у|в)\s+(?:весь|всьому|усьому|цілому|цілий)\s+двор/iu,
-  /(?<![\p{L}])а отже(?![\p{L}])/iu, /як намаг/iu, /(?<![\p{L}])така\s+(?:ж\s+)?[\p{L}]+\s+(?:і|й)\s+[\p{L}]+/iu, /метафізик/iu, /(?<![\p{L}])(?:абсурд|парадокс)/iu, /^[\p{L}'’-]+,\s+(?:твій|твоє|твоя|твої|твого|твою)\s[^,.!?]{0,60}?\s[-—–]\s/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
+  /(?<![\p{L}])а отже(?![\p{L}])/iu, /(?<![\p{L}])намаг/iu, /(?<![\p{L}])така\s+(?:ж\s+)?[\p{L}]+\s+(?:і|й)\s+[\p{L}]+/iu, /метафізик/iu, /(?<![\p{L}])(?:абсурд|парадокс)/iu, /^[\p{L}'’-]+,\s+(?:твій|твоє|твоя|твої|твого|твою)\s[^,.!?]{0,60}?\s[-—–]\s/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
+export const ticky = (t) => TICS.some((re) => re.test(t)); // her own past replies with a tic are not shown back to her: they bred more of it
 const ticCount = (d, asked) => TICS.filter((re) => re.test(d) && !re.test(asked)).length;
 export const ticFree = (drafts, asked) => {
   const least = Math.min(...drafts.map((d) => ticCount(d, asked)));
@@ -900,7 +915,13 @@ const noTic = (t) => t.replace(/(^|[.!?…]\s+)суцільн\p{L}*\s+(\p{L})/gi
 // both outright, so code swaps them for plain words (same endings, so the grammar holds). Capital letter is kept.
 const SWAPS = [[/(?<![\p{L}])пафосн(\p{L}*)/giu, (m, e) => "урочист" + e], [/(?<![\p{L}])пафосом(?![\p{L}])/giu, () => "урочистістю"],
   [/(?<![\p{L}])пафос[уі](?![\p{L}])/giu, () => "урочистості"], [/(?<![\p{L}])пафос(?![\p{L}])/giu, () => "урочистість"],
-  [/(?<![\p{L}])мандахуйов(\p{L}*)/giu, (m, e) => "хрінов" + e], [/(?<![\p{L}])мандахуй\p{L}*/giu, () => "хрін"]];
+  [/(?<![\p{L}])мандахуйов(\p{L}*)/giu, (m, e) => "хрінов" + e], [/(?<![\p{L}])мандахуй\p{L}*/giu, () => "хрін"],
+  // 13.10.2026 (Lida, "викреслюй оце слово «намагання», від нього вже тошно"): every grumble and answer was "це як намагання …".
+  // The word goes by code; ticFree and the filter on her own past replies fight the frame itself.
+  [/(?<![\p{L}])намагання(?![\p{L}])/giu, () => "спроба"], [/(?<![\p{L}])намаганням(?![\p{L}])/giu, () => "спробою"], [/(?<![\p{L}])намаганн[іюї](?![\p{L}])/giu, () => "спробі"],
+  [/(?<![\p{L}])намагат(?:ися|ись)(?![\p{L}])/giu, () => "пробувати"], [/(?<![\p{L}])намагаюс[яь](?![\p{L}])/giu, () => "пробую"], [/(?<![\p{L}])намагаєшся(?![\p{L}])/giu, () => "пробуєш"],
+  [/(?<![\p{L}])намагається(?![\p{L}])/giu, () => "пробує"], [/(?<![\p{L}])намагаємося(?![\p{L}])/giu, () => "пробуємо"], [/(?<![\p{L}])намагаються(?![\p{L}])/giu, () => "пробують"],
+  [/(?<![\p{L}])намагайся(?![\p{L}])/giu, () => "пробуй"], [/(?<![\p{L}])намагайтеся(?![\p{L}])/giu, () => "пробуйте"]];
 const swapBanned = (t) => SWAPS.reduce((r, [re, to]) => r.replace(re, (...a) => {
   const w = to(...a); return /^\p{Lu}/u.test(a[0]) ? w[0].toUpperCase() + w.slice(1) : w;
 }), t);
@@ -1031,9 +1052,14 @@ const DRAW_CMD = new RegExp("(?<![" + CYR + "])(?:"
   + "|(?:чека(?:ю|ємо)|жду|ждем|ждём|очікую|хочу|хочемо|прошу|потрібн[" + CYR + "]*|нужн[" + CYR + "]*|треба|надо)\\s+(?:мені\\s+|мне\\s+|нам\\s+)?(?:[" + CYR + "]+\\s+)?(?:" + DRAW_NOUN + ")"
   + "|^\\s*(?:" + DRAW_NOUN + ")\\s*[:—–-]"
   + ")", "iu");
-export const isDrawCmd = (raw) => DRAW_CMD.test(raw.replace(/@\w+/g, " "));
+// "скинь йому волохатого вареника" (13.10.2026): a hand-over verb + "йому / їй / мені…" + a thing is a request for the thing's
+// picture — unless the thing is a text topic of its own (recipe, joke, advice) or cannot be drawn (a link, a number, money).
+const HANDOVER = new RegExp("(?<![" + CYR + "])(?:скинь|скиньте|кинь|киньте|пришли|пришліть|надішли|надішліть)\\s+(?:йому|їй|їм|мені|нам|ним)\\s+(?=[" + CYR + "])", "iu");
+const NOT_DRAWN = /(?<![а-яіїєґё'’])(?:гіфк|гифк|мем|посилан|ссылк|номер|пароль|адрес|геолокац|файл|фото|відео|видео|стікер|ключ|гроші|гривн|деньг|рецепт|анекдот|жарт|вірш|стих|пісн|пораду|порад|совет|тост|привітан|загадк|гороскоп|гадан|таро|знати|знать|потім|потом|привіт|привет|грн|дякую|спасибі|відповід|ответ|скоро|пізніше|звістк|новин|інфу|інформаці)/iu;
+const handOver = (clean) => { const m = HANDOVER.exec(clean); return m && !NOT_DRAWN.test(clean.slice(m.index + m[0].length)) ? m : null; };
+export const isDrawCmd = (raw) => { const clean = raw.replace(/@\w+/g, " "); return DRAW_CMD.test(clean) || Boolean(handOver(clean)); };
 export const drawSubject = (raw) => {
-  const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean);
+  const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean) || handOver(clean);
   if (!m) return "";
   const rest = (clean.slice(0, m.index) + " " + clean.slice(m.index + m[0].length))
     .replace(/(?<![а-яіїєґ])(?:мені|мне|нам|будь\s+ласка|пожалуйста|плиз|пж|пжлст|на\s+картинці|на\s+картинке|чека(?:ю|ємо)|жду|ждем|ждём|очікую|хочу|хочемо|прошу|потрібн\S*|нужн\S*|треба|надо|картинк\S*|малюнк\S*|рисунк\S*|зображенн\S*|изображен\S*|можеш|можешь|зможеш|сможешь|(?:на|з)?малю\S*|(?:на|за)?рису\S*|(?:на|за)?рисов\S*|накида\S*|ти|ты|збоченк\S*|збоченец|дурн\S*|дурепа|стара|старая|старенька|старенькая|стару|карга|каргa|каргу|кошолк\S*|бабищ\S*|бабця|бабцю|бабко|бабка|бабусю|бабуся|бабушка|бабуля|бабулю|хай|ну)(?![а-яіїєґ])/giu, " ");
@@ -1230,6 +1256,18 @@ export const rhymeTail = (target, out) => {
   return good.length >= 2 && rest.length >= 2 ? [good.join(", "), ...rest.slice(0, 2)].join("\n") : null;
 };
 // Colour for a grumble: the chat right now (bodies, no names) picks the theme; words and one closer, no swearing.
+// A grumble's shape is picked by code (13.10.2026, "фразы повторялись, не по-человечески": both 17:00 grumbles were "це як
+// намагання …"): the file said "абсурдне порівняння", so every phrase was one simile. Code hands the form and the length;
+// no example phrases here, the model copies those.
+export const GRUMBLE_FORMS = ["скарга на одну конкретну дрібницю, без жодного порівняння", "риторичне питання в нікуди", "коротка репліка, ніби кинута впівголоса",
+  "спогад «а ось колись…» про те, як було краще", "повчання молодшим, ніби вони завинили", "підсумок дня одним реченням, як у новинах, але по-бабцьому",
+  "гукає всім разом з лавки", "наказ усім розійтись або зробити конкретну дрібницю", "здивування, чого це так, і власна дивна версія причини",
+  "пророцтво, що з цього вийде найгірше", "переказ того, що їй щойно сказала вигадана сусідка без імені, і її реакція", "бурмотіння про своє — суглоби, тиск, лавка, чай"];
+export const GRUMBLE_LENGTHS = ["одне коротке речення, до десяти слів", "два короткі речення", "до двадцяти п'яти слів"];
+export const grumbleShape = (withForm = true, rnd = Math.random) => `${withForm ? `Форма: ${GRUMBLE_FORMS[Math.floor(rnd() * GRUMBLE_FORMS.length)]}. ` : ""}Довжина: ${GRUMBLE_LENGTHS[Math.floor(rnd() * GRUMBLE_LENGTHS.length)]}.${withForm ? " Не повторюй хід прикладів." : ""}\n`;
+// A new grumble that starts like one of her last lines (the first two words) is the same phrase in a new coat.
+const opening = (t) => (t.toLowerCase().match(/\p{L}+/gu) ?? []).slice(0, 2).join(" ");
+export const openedLike = (text, lines) => { const o = opening(text); return o.includes(" ") && lines.some((l) => opening(l) === o); };
 export const grumbleHint = (bases, chat = "", recent = "") => {
   // 09.10.2026 (user): the grumble draws on all the bases — words, an opener or a closer, and a wish when the chat calls for one.
   const frame = pickFrom(Math.random() < 0.5 ? bases.openers : bases.closers, "", chat, recent, 1), wish = pickFrom(bases.blessings, chat, "", recent, 1);
@@ -1315,17 +1353,22 @@ if (import.meta.main) {
   assert.equal(grumbleSection(1020, 10), "загальне");
   assert.equal(grumbleSection(1110, 10), "вечір");
   assert.equal(grumbleSection(750, null), "обід");
-  { // 13.10.2026: one extra a day (tease / Сусід / GIF), always 15:00–19:30 off the grumble tick
+  { // 13.10.2026: a random grumble and a phrase (Lida on odd days, Сусід on even) a day, both 15:00-19:00 and never one tick
     const days = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10));
     for (const day of days) {
-      const ms = [teaseMinute(day), neighbourMinute(day), gifMinute(day)].filter((m) => m != null);
-      assert.equal(ms.length, 1, day);
-      assert.ok(ms[0] >= 900 && ms[0] <= 1170 && ms[0] % 30 === 0 && !GRUMBLE_SLOTS.includes(ms[0]), `${day} ${ms[0]}`);
+      const p = teaseMinute(day) ?? neighbourMinute(day), g = grumbleMinute(day);
+      assert.ok(p != null && (teaseMinute(day) == null || neighbourMinute(day) == null), day); // exactly one of the two
+      for (const m of [p, g]) assert.ok(m >= 900 && m <= 1140 && m % 30 === 0, `${day} ${m}`);
+      assert.notEqual(p, g, day);
+      const all = Array.from({ length: 48 }, (_, i) => due(day, i * 30)).flat();
+      assert.equal(all.filter((x) => x === "бурчання").length, 2, day); // 08:00 and the afternoon one
+      assert.equal(all.filter((x) => x === "підколка" || x === "сусід").length, 1, day);
+      assert.ok(!all.includes("гіфка"), day);
     }
-    for (const [fn, n] of [[teaseMinute, 6], [neighbourMinute, 3], [gifMinute, 3]]) assert.equal(days.filter((d) => fn(d) != null).length, n, fn.name);
-    assert.ok(new Set(days.map((d) => teaseMinute(d) ?? neighbourMinute(d) ?? gifMinute(d))).size > 3, "different days, different times");
+    assert.deepEqual(days.filter((d) => teaseMinute(d) != null).length, 6); // odd days: Lida
+    assert.ok(new Set(days.map(grumbleMinute)).size > 3, "different days, different times");
     // Mornings are quiet: 08:00 grumble and nothing else till the 13:00 play and the 15:00 mark.
-    for (const day of days) for (let m = 0; m < 1440; m += 30) if (m > 480 && m < 900 && m !== 780) assert.ok(!due(day, m).some((x) => /бурчання|сусід|підколка|гіфка/.test(x)), `${day} ${m}`);
+    for (const day of days) for (let m = 0; m < 1440; m += 30) if (m > 480 && m < 900 && m !== 780) assert.ok(!due(day, m).some((x) => /бурчання|сусід|підколка/.test(x)), `${day} ${m}`);
   }
   assert.equal(grumbleSection(1020, null), "загальне");
   const g = parseGrumbles(readFileSync(new URL("../prompts/grumbles.txt", import.meta.url), "utf8"));
@@ -1799,11 +1842,10 @@ if (import.meta.main) {
   assert.equal(excerpt("коротко", 120), "коротко");
   assert.equal(shortDash("Lida — ковбаска, 13:00–15:00"), "Lida - ковбаска, 13:00-15:00");
   assert.deepEqual(tailFit(["старе", "x".repeat(50), "нове"], 10, 20), ["xxxxxxxxxx…", "нове"]);
-  for (let k = 0; k < 120; k++) { // four months: the GIF never shares a minute with Сусід
+  for (let k = 0; k < 120; k++) { // four months: the afternoon grumble never shares a tick with the phrase
     const day = new Date(Date.UTC(2026, 8, 1) + k * 864e5).toISOString().slice(0, 10);
-    assert.ok(gifMinute(day) == null || gifMinute(day) !== neighbourMinute(day), day);
+    assert.notEqual(grumbleMinute(day), teaseMinute(day) ?? neighbourMinute(day), day);
   }
-  assert.notEqual(gifMinute("2026-09-30"), neighbourMinute("2026-09-30"));
   assert.equal(plainMoral("Ivan M: Так.\n\n(Мораль: Якщо нема доказів — вибери табуретку.)"), "Ivan M: Так.\n\nМораль: Якщо нема доказів — вибери табуретку.");
   const hairChat = ["[21:10] Lida: Волохаті люди красиві", "[21:11] Taras: вони ж воняють коли давно не миті, це некрасиво"];
   const hairPlay = "Taras (з презирством): Вони ж воняють, коли давно не миті!\nLida: Волохаті люди красиві і воняють коли давно не миті!\nLida: Волохаті люди красиві, крапка.";
@@ -1953,7 +1995,36 @@ if (import.meta.main) {
   }
   assert.ok(isStockPaint(REFUSE_PAINT[0]) && !isStockPaint("Такий собі кіт"));
   assert.ok(!/збоченк/i.test(drawSubject("@babtsya_z_altanky_bot Збоченка. намалюй кота")));
-  assert.deepEqual(GRUMBLE_SLOTS, [480, 1020]); // 13.10.2026
+  { // "намагання" (13.10.2026): the word is swapped by code, her own tic-ridden replies are recognised
+    assert.equal(tidy("Це як намагання знайти ключ, і Намагатися дарма."), "Це як спроба знайти ключ, і Пробувати дарма.");
+    assert.ok(!/намаг/i.test(tidy("Ти намагаєшся, він намагається, вони намагаються, не намагайся.")));
+    assert.ok(ticky("Ті розмови про зброю - це як намагання виполоскати рота") && ticky("це як намагатися") && !ticky("Ну і шо тепер, Колю?"));
+  }
+  { // grumble shape (13.10.2026): a form and a length from code; an opening she already used is a repeat
+    assert.match(grumbleShape(true, () => 0), /^Форма: скарга на одну конкретну дрібницю.*Довжина: одне коротке речення.*Не повторюй хід прикладів\.\n$/);
+    assert.equal(grumbleShape(false, () => 0.99), "Довжина: до двадцяти п'яти слів.\n"); // Сусід keeps his own motif and form
+    assert.equal(new Set(GRUMBLE_FORMS.map((_, i) => grumbleShape(true, () => i / GRUMBLE_FORMS.length))).size, GRUMBLE_FORMS.length);
+    assert.ok(GRUMBLE_FORMS.every((f) => !/[«»]{2}/.test(f) && f.length < 120) && !GRUMBLE_FORMS.some((f) => /це як|наче/i.test(f)));
+    assert.equal(openedLike("Знов ви тут, наркомани!", ["Знов ви тут сидите", "інше"]), true);
+    assert.equal(openedLike("знов, ви тут", ["Знов ви тут сидите"]), true); // case and punctuation don't count
+    assert.equal(openedLike("Ну і шо тепер", ["Знов ви тут сидите"]), false);
+    assert.equal(openedLike("Знов", ["Знов ви тут"]), false); // one word is not an opening
+  }
+  { // "скинь йому волохатого вареника" (13.10.2026) is a picture request; recipes, jokes, links and the like are not
+    const B = "@babtsya_z_altanky_bot";
+    assert.ok(isDrawCmd(`${B} скинь йому волохатого вареника`) && isDrawCmd(`${B} кинь їй борщу, швидко`) && isDrawCmd(`${B} пришли мені кота в чоботах`));
+    assert.equal(drawSubject(`${B} скинь йому волохатого вареника`), "волохатого вареника");
+    for (const q of ["скинь мені рецепт борщу", "скинь йому посилання", "скинь мені гіфку", "скинь мені анекдот", "скинь мені пораду", "скинь мені номер Олі", "скинь йому", "скинь це", "скинь пароль", "кинь мені знати", "скинь мені потім", "пришли йому привіт", "скинь мені 100 грн", "надішли мені відповідь", "скинь мені дякую"]) assert.ok(!isDrawCmd(`${B} ${q}`), q);
+  }
+  { // claim (13.10.2026): the first run of a tick wins, a repeat is refused, a broken table lets the post through
+    const seen = new Set(), db = { prepare: (q) => ({ bind: (...a) => ({ run: async () => q.startsWith("INSERT") ? { meta: { changes: seen.has(a[0]) ? 0 : (seen.add(a[0]), 1) } } : { meta: { changes: 0 } } }) }) };
+    assert.equal(await claim(db, "2026-10-13|1020|бурчання"), true);
+    assert.equal(await claim(db, "2026-10-13|1020|бурчання"), false);
+    assert.equal(await claim(db, "2026-10-13|1050|бурчання"), true); // the next tick is another key
+    const broken = { prepare: () => { throw new Error("no such table: ticks"); } };
+    assert.equal(await claim(broken, "x"), true);
+  }
+  assert.deepEqual(GRUMBLE_SLOTS, [480]); // 13.10.2026
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot дай Артема") && !isDrawCmd("@babtsya_z_altanky_bot дай мені спокій") && !isDrawCmd("@babtsya_z_altanky_bot покажи, як ти малюєш"));
   { // the politics reference (13.10.2026): matched by the ask, at most three sections, nothing for an unrelated ask
     const pol = parseCurses(readFileSync(new URL("../prompts/politics.txt", import.meta.url), "utf8"));

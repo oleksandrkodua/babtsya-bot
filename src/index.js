@@ -13,7 +13,7 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, gifMinute, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -160,29 +160,30 @@ export default {
     const done = (kind) => env.DB.prepare("SELECT 1 FROM digests WHERE day = ? AND kind = ?").bind(day, kind).first();
     const yesterday = new Date(Date.parse(day) - 864e5).toISOString().slice(0, 10);
     let posted = false;
-    if (d.has("денна п'єса") && !(await done("midday")) && (await pending()) >= MIDDAY_MIN) {
+    // A tick delivered twice must act once: every post claims its tick first (13.10.2026, two grumbles at 17:00 and 17:01).
+    const once = (what) => claim(env.DB, `${day}|${m}|${what}`);
+    if (d.has("денна п'єса") && !(await done("midday")) && (await pending()) >= MIDDAY_MIN && (await once("midday"))) {
       console.log(await digest(env, day, "midday"));
       posted = true;
     }
     if (d.has("закрити вчорашнє опитування")) await closePoll(env, yesterday).catch((e) => console.log("poll close:", e.message));
     if (d.has("закрити опитування")) await closePoll(env, day).catch((e) => console.log("poll close:", e.message));
-    if (d.has("вечірня п'єса") && !(await done("evening")) && (await pending()) >= EVENING_MIN) {
+    if (d.has("вечірня п'єса") && !(await done("evening")) && (await pending()) >= EVENING_MIN && (await once("evening"))) {
       console.log(await digest(env, day, "evening"));
       posted = true;
     }
     // A grumble right under a fresh digest would bury it.
     const afterMidday = m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1] && (await done("midday"));
-    if (d.has("бурчання") && !posted && !afterMidday) console.log(await grumble(env, now));
-    if (d.has("сусід")) console.log(await grumble(env, now, "сусід"));
-    if (d.has("підколка") && env.TEASE) console.log(await tease(env, target(env)).catch((e) => `tease: ${e.message}`));
-    if (d.has("гіфка")) console.log(await gif(env, target(env)).catch((e) => `gif: ${e.message}`));
+    if (d.has("бурчання") && !posted && !afterMidday && (await once("бурчання"))) console.log(await grumble(env, now));
+    if (d.has("сусід") && (await once("сусід"))) console.log(await grumble(env, now, "сусід"));
+    if (d.has("підколка") && env.TEASE && (await once("підколка"))) console.log(await tease(env, target(env)).catch((e) => `tease: ${e.message}`));
     // Night refill after the 03:00 neuron reset: one picture per tick 04:00–05:30 while the stock is short.
     if (d.has("запас м'яса") && env.TEASE) {
       const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM pics WHERE kind = 'meat' AND used IS NULL").first("n").catch(() => STOCK_MIN);
       if (left < STOCK_MIN) console.log(await stockMeat(env).catch((e) => `stock: ${e.message}`));
     }
     if (d.has("хроніка тижня")) console.log(await chronicle(env).catch((e) => `chronicle: ${e.message}`));
-    if (d.has("опитування")) console.log(await poll(env));
+    if (d.has("опитування") && (await once("опитування"))) console.log(await poll(env));
   },
 };
 
@@ -227,7 +228,8 @@ async function ingest(env, update, ctx) {
     // A photo in the tagged message or in the one it replies to ("що це?", "де це?", 06.10.2026): the size ≤ 800 px
     // is enough for the model and cheaper than the full one.
     const sizes = msg.photo || r0?.photo, photo = sizes ? (sizes.filter((p) => p.width <= 800).at(-1) || sizes[0]).file_id : "";
-    if (!held(new Date())) ctx.waitUntil(answer(env, msg, name, raw, toBot ? r0.text || r0.caption || "" : "", other, news, photo));
+    // One answer per message: a redelivered update must not draw or write twice (13.10.2026, doubled pictures).
+    if (!held(new Date()) && (await claim(env.DB, `відповідь|${msg.chat.id}|${msg.message_id}`))) ctx.waitUntil(answer(env, msg, name, raw, toBot ? r0.text || r0.caption || "" : "", other, news, photo));
   }
   let text = messageText(msg);
   if (!text) return;
@@ -501,16 +503,18 @@ const TULER_MOTIFS = ["оперативка чи нарада", "велосип�
 const TULER_FORMS = ["питання до всього чату", "спогад бабці з вісімдесятих чи дев'яностих", "звіт ЖЕКу про Сусіда", "пророцтво на завтра", "коротка репліка, до 12 слів", "порівняння з побутом бабці"];
 async function newGrumble(env, section, list, clock = "", chat = "") {
   const now = chat ? `ЩО ЗАРАЗ У ЧАТІ (зачепися за одну конкретну тему звідси — предмет, подію чи суперечку; імен не називай):\n${chat}\n\n` : "";
-  const past = await lately(env);
+  const lines = await saidList(env), past = await lately(env, lines);
   const one = async () => {
     const examples = [...list].sort(() => Math.random() - 0.5).slice(0, 6).join("\n");
-    const said = await ai(env, grumblePrompt, `${past}${clock ? `Зараз ${clock} за Києвом — якщо згадуєш час, то лише цей.\n` : ""}${now}${grumbleHint(BASES, chat, past)}${section === "сусід" ? `Мотив: ${oneOf(TULER_MOTIFS)}. Форма: ${oneOf(TULER_FORMS)}. Не повторюй хід прикладів.\n` : ""}Тема: ${section}\nПриклади:\n${examples}`, 1.0, 120);
+    const said = await ai(env, grumblePrompt, `${past}${clock ? `Зараз ${clock} за Києвом — якщо згадуєш час, то лише цей.\n` : ""}${now}${grumbleHint(BASES, chat, past)}${section === "сусід" ? `Мотив: ${oneOf(TULER_MOTIFS)}. Форма: ${oneOf(TULER_FORMS)}. Не повторюй хід прикладів.\n` : ""}${grumbleShape(section !== "сусід")}Тема: ${section}\nПриклади:\n${examples}`, 1.0, 120);
     const t = said ? tidy(warFallback(stripHints(said.trim().split("\n")[0], "").replace(/^[«"]+|[»"]+$/g, ""), "")) : "";
     // A copy of an example isn't new: better the file's phrase than a disguised repeat.
     return t.length >= 15 && !list.includes(t) ? t : "";
   };
-  const drafts = (await Promise.all([one(), one()])).filter(Boolean);
+  let drafts = ticFree((await Promise.all([one(), one()])).filter(Boolean), "");
   if (!drafts.length) return "";
+  const fresh = drafts.filter((d) => !openedLike(d, lines.map((r) => r.text)));
+  if (fresh.length) drafts = fresh; // a repeated opening only if nothing else is left
   const { best } = drafts.length < 2 ? { best: 0 }
     : parseVote(await ai(env, GRUMBLE_JUDGE, `${past}${now}Фрази:\n${drafts.map((d, i) => `${i + 1}. ${d}`).join("\n")}`, 0.2, 8), drafts.length);
   const text = applyFixes(drafts[best], dedupLoop(await ai(env, polishPrompt, drafts[best], 0.2, 200)), { protectedTerms: [BOT_NAME] }).text.trim();
@@ -661,8 +665,13 @@ const remember = (env, text) => env.DB.batch([
   env.DB.prepare("INSERT INTO said (ts, text) VALUES (?, ?)").bind(Math.floor(Date.now() / 1000), text.slice(0, 400)),
   env.DB.prepare("DELETE FROM said WHERE ts < ?").bind(Math.floor(Date.now() / 1000) - 3 * 86400),
 ]).catch(() => {});
-async function lately(env) {
-  const { results } = await env.DB.prepare("SELECT text FROM said ORDER BY ts DESC LIMIT 10").all().catch(() => ({ results: [] }));
+// Her last lines, minus the ones with a tic: "це як намагання" in them bred the next one (13.10.2026).
+async function saidList(env) {
+  const { results } = await env.DB.prepare("SELECT text FROM said ORDER BY ts DESC LIMIT 20").all().catch(() => ({ results: [] }));
+  return results.filter((r) => !ticky(r.text)).slice(0, 10);
+}
+async function lately(env, results) {
+  results ??= await saidList(env);
   return results.length ? `ТВОЇ ОСТАННІ РЕПЛІКИ (не повторюй їхніх образів, слів, порівнянь і зачинів):\n${results.map((r) => `- ${r.text.slice(0, 160)}`).join("\n")}\n\n` : "";
 }
 

@@ -73,3 +73,9 @@ CREATE TABLE IF NOT EXISTS spend (
   neurons REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS spend_ts ON spend (ts);
+
+-- One run per cron tick / tagged message (13.10.2026): the first INSERT wins, a repeat is a no-op.
+CREATE TABLE IF NOT EXISTS ticks (
+  key TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL
+);
