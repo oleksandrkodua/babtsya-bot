@@ -1198,9 +1198,11 @@ export function finalize(play) {
   play = tidy(play).replace(/([^\n])\n(\(Сцена)/g, "$1\n\n$2");
   if (!play.trimStart().startsWith(`${BOT_NAME} представляє`)) play = `${BOT_NAME} представляє\n\n${play.trimStart()}`;
   if (play.length > HARD_LIMIT) {
-    // ponytail: last-resort cut at a paragraph break drops the ending; fires only if the fit-to-length pass also failed.
-    const cut = play.lastIndexOf("\n\n", HARD_LIMIT);
-    play = cut > 0 ? play.slice(0, cut) : play.slice(0, HARD_LIMIT);
+    // ponytail: last-resort cut at a paragraph break; fires only if the fit-to-length pass also failed.
+    // 13.10.2026: the cut took the moral (the last paragraph) — the moral stays, the paragraphs before it go.
+    const at = play.lastIndexOf("\nМораль"), tail = at > 0 ? play.slice(at + 1) : "", head = at > 0 ? play.slice(0, at) : play;
+    const room = HARD_LIMIT - (tail ? tail.length + 2 : 0), cut = head.lastIndexOf("\n\n", room);
+    play = (cut > 0 ? head.slice(0, cut) : head.slice(0, room)).trimEnd() + (tail ? `\n\n${tail}` : "");
   }
   return play;
 }
@@ -1819,6 +1821,11 @@ if (import.meta.main) {
   assert.ok(finalize(long).length <= HARD_LIMIT && finalize("текст").startsWith(`${BOT_NAME} представляє`));
   assert.ok(finalize("««Симфонія»»").includes("«Симфонія»") && !finalize("««Симфонія»»").includes("««"));
   assert.equal(titled("(Сцена 1. Двір. Тихо.)\nA: Ну\n\n(Сцена 2)\nB: Ага"), 1); // 11.10.2026: only named headers count
+  { // 13.10.2026: an over-long play keeps its moral; the paragraphs before it are cut
+    const long = `Дійові особи:\nA — а\n\n${"(Сцена 1. Двір. Тихо.)\nA: Ну!\n\n".repeat(200)}(Також у дворі галасували: Б.)\n\nМораль: Так буває.`, out = finalize(long);
+    assert.ok(out.length <= HARD_LIMIT && out.endsWith("Мораль: Так буває."), out.slice(-60));
+    assert.ok(finalize("A: Ну!\n\nМораль: ні.").endsWith("Мораль: ні."));
+  }
   assert.ok(finalize("Lida: ковбаска!\n(Сцена 2: корж)").includes("ковбаска!\n\n(Сцена 2"));
   assert.ok(finalize("«<Екзистенційний привід ШІ>»").includes("«Екзистенційний привід ШІ»"));
   assert.ok(finalize("пахне дешевимกาแฟ з АТБ, 漢字 теж").includes("пахне дешевим з АТБ, теж"));
