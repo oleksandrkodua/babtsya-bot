@@ -592,8 +592,8 @@ export const ticFree = (drafts, asked) => {
 // last 24 hours, not a UTC day (seen twice 30.09; Cloudflare's docs say 00:00 UTC — rolling is the stricter of the two).
 // Both plays fall in any 24 h ahead, so for each one: what is spent in the 24 h before it (rows that slid out no longer
 // count), the plays up to it, and the small daily stuff pro rata, must leave room. Measured: a play with poster
-// ≈ 2–2.5k, a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
-export const NEURONS_DAY = 10000, PLAY_NEURONS = 2500, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
+// ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
+export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
 export function repliesLeft(rows, nowMs, offsetSec) {
   const DAY = 864e5, next = (h) => {
     let t = Math.floor(nowMs / DAY) * DAY + h * 36e5 - offsetSec * 1000 - DAY;
@@ -1171,7 +1171,16 @@ export function draftHint({ topic, hints = true, who, byName, tone, curses, lex,
 // After the model corrector: the fixed phrase leads once, names are put right, the answer's own name goes, the length is capped.
 export function finishReply(text, { fixed = "", names, to, long = false }) {
   if (fixed) text = leadFixed(text, fixed);
-  return dropName(fixNames(text, names), to).slice(0, long ? 1500 : 500);
+  return capReply(dropName(fixNames(text, names), to), long ? 1500 : 500);
+}
+// Over the cap: back to the last full sentence (if it keeps over half), else the last whole word. A bare slice(0, 500)
+// sent "…На ґанку найкраще ду" to the group (13.10.2026).
+export function capReply(text, cap) {
+  if (text.length <= cap) return text;
+  const cut = text.slice(0, cap), end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "), cut.endsWith(".") ? cut.length - 1 : -1);
+  if (end >= cap / 2) return cut.slice(0, end + 1);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > 0 ? cut.slice(0, sp) : cut).replace(/[\s,;:—-]+$/, "");
 }
 // What goes out: her own instructions never (30.09.2026), a stock line instead of silence.
 export const replyOut = (said, leaked, nap) => leaked ? LEAK_REPLY : said || nap;
@@ -1605,7 +1614,7 @@ if (import.meta.main) {
     const late = Date.UTC(2026, 9, 3, 20) / 1000; // a late play yesterday at 23:00 Kyiv — still inside tonight's window
     assert.equal(repliesLeft([{ ts: late, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 10 / 24) / REPLY_NEURONS)); // 5
     const onTime = Date.UTC(2026, 9, 3, 19) / 1000; // 22:00 Kyiv yesterday: out of tonight's window, so only 13:00 counts it
-    assert.equal(repliesLeft([{ ts: onTime, neurons: 2500 }], now, kyivOff), 11);
+    assert.equal(repliesLeft([{ ts: onTime, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - PLAY_NEURONS - OTHER_NEURONS / 24) / REPLY_NEURONS));
     const old = Date.UTC(2026, 9, 3, 8) / 1000; // 11:00 Kyiv yesterday: slides out before 13:00
     assert.equal(repliesLeft([{ ts: old, neurons: 9000 }], now, kyivOff), repliesLeft([], now, kyivOff));
     assert.equal(repliesLeft([{ ts: now / 1000 - 60, neurons: 9999 }], now, kyivOff), 0);
@@ -2101,6 +2110,10 @@ if (import.meta.main) {
     const led = finishReply("а шизік, знов дуріє", { fixed: "шизік", names: ["Оля"], to: "Оля" });
     assert.ok(led.startsWith("Шизік. ") && led.match(/шизік/gi).length === 1); // the phrase leads, once
     assert.equal(finishReply("а".repeat(900), { names: [], to: "Оля" }).length, 500);
+    const live = "Тарасе, ця Кеті Захарія — то не прессекретарка, а як той підвид з казки: десять років у житті дірок, наче у дірявій сітці, поки не поперлася в Китай іспити здавати, блядь. Це ж треба було так розвестися, наче на розпродажі в АТБ, коли замість сосисок тобі пропонують сушені квіти: замість законів США вона там пекінські мандаринки в юридичній формі жувала, а тепер каже, що вона професіонал. В підручниках про таких напишуть, як про людей, що замість палива в мотор заливали квас. На ґанку найкраще дути в кулак, бо далі вже ніхто не слухає.";
+    assert.ok(capReply(live, 500).endsWith("заливали квас."), "cut at the last full sentence");
+    assert.equal(capReply("слово ".repeat(200) + "ду", 500).endsWith("слово"), true); // no sentence: whole word
+    assert.equal(capReply("Коротка відповідь.", 500), "Коротка відповідь.");
     assert.equal(finishReply("а".repeat(900), { names: [], to: "Оля", long: true }).length, 900);
     assert.equal(finishReply("я".repeat(2000), { names: [], to: "Оля", long: true }).length, 1500);
     assert.equal(replyOut("відповідь", true, "NAP"), LEAK_REPLY);

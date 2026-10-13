@@ -653,7 +653,7 @@ async function ai(env, system, user, temperature, max_tokens = 6000, pause = 200
 
 const spend = (env, neurons) => env.DB.prepare("INSERT INTO spend (ts, neurons) VALUES (?, ?)").bind(Math.floor(Date.now() / 1000), neurons).run().catch(() => {});
 // A picture: klein's price list gives ~104 for 1024², the dashboard showed 165–190 (29.09.2026) — the measured one counts.
-const PIC_NEURONS = 180;
+const PIC_NEURONS = 135; // panel 13.10.2026: 1.63k for 12 pictures, not 180 each
 const left = async (env) => {
   const { results } = await env.DB.prepare("SELECT ts, neurons FROM spend WHERE ts > ?").bind(Math.floor(Date.now() / 1000) - 2 * 86400).all();
   await env.DB.prepare("DELETE FROM spend WHERE ts < ?").bind(Math.floor(Date.now() / 1000) - 2 * 86400).run();
