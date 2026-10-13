@@ -5,7 +5,7 @@ workers_dev = true # the webhook address: https://babtsya-bot.<your-subdomain>.w
 preview_urls = false
 
 # Every 30 min; the Worker itself decides by Kyiv time (13:00–16:00 midday, 22:00–23:00 evening,
-# grumbles every 90 min 08:00–21:30).
+# grumbles 08:00 and 17:00, one extra 15:00–19:30: tease / neighbour phrase / GIF by date).
 [triggers]
 crons = ["0,30 * * * *"]
 

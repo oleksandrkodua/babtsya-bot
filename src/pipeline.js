@@ -107,40 +107,25 @@ export function applyFixes(text, reply, { maxOld = 40, maxNew = 60, protectedTer
 // ponytail: stem-in-chat heuristic — a metaphor slips through on a day a member wrote the same word.
 export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []).map((w) => w.toLowerCase()))].filter((w) => !chat.toLowerCase().includes(w));
 
-// Grumbles: every 3.5 h — 08:00, 11:30, 15:00, 18:30 Kyiv (minutes of the day; user, 10.10.2026; every 2 h till then, every 90 min till 30.09.2026); 08:00 is always a morning one.
+// Grumbles (user, 13.10.2026): 08:00 (the morning one), then silence until the 13:00 play and till 15:00, then ONE grumble
+// at 17:00. Every day also has exactly one random extra, a half-hour tick 15:00–19:30 off the grumble: odd days — the Lida
+// tease with a meat picture, even days alternate Сусід's phrase and a GIF from the owner's stock. The tick comes from the date
+// itself, so there's nothing to store and a retried cron can't post it twice. (Was every 3.5 h till 13.10, every 2 h till 10.10.)
 // 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
 // ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 22:30, then the evening play; the poll is sent by hand
 // (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
 export const ONE_OFF = { day: "2026-09-30", quietUntil: 22 * 60 + 30, evening: 22 * 60 + 30 }; // minutes of the day
 export const oneOff = (day) => (day === ONE_OFF.day ? ONE_OFF : null);
-export const GRUMBLE_SLOTS = [480, 690, 900, 1110];
-export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00 
+export const GRUMBLE_SLOTS = [480, 1020];
+export const MIDDAY_QUIET = [13 * 60, 15 * 60]; // after the 13:00 play nothing till 15:00
 const HOT_MIN = 30, QUIET_MAX = 2; // ponytail: messages in the last 90 min; tune on the real group
-
-// Сусід gets one phrase a day at a half-hour tick 09:00–19:30 that no regular grumble uses and that isn't in the
-// 13:00–15:00 quiet. The tick comes from the date itself, so there's nothing to store and a retried cron can't post it twice.
-// ponytail: day number × 7 over 12 ticks — next day jumps ~3.5 h, the pattern repeats every 12 days.
-const NEIGHBOUR_TICKS = Array.from({ length: 22 }, (_, i) => 540 + i * 30)
-  .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
-// One tease (TEASE in wrangler.toml) every second day (odd day numbers, so 25.09.2026 is one) at a half-hour 16:00–23:00 (user, 25.09.2026) — past the evening
-// silence on purpose, but not on the 21:00 poll, the 22:00 play or a grumble tick. Same date trick as Сусід.
-const TEASE_TICKS = Array.from({ length: 15 }, (_, i) => 960 + i * 30).filter((m) => ![1260, 1320].includes(m) && !GRUMBLE_SLOTS.includes(m));
-export const teaseMinute = (day) => {
-  const d = Date.parse(day) / 864e5;
-  return d % 2 === 1 ? TEASE_TICKS[d % TEASE_TICKS.length] : null;
-};
-// A GIF from the owner's stock every second day (even day numbers — the tease has the odd ones), at a half-hour
-// 10:00–19:30 off the grumble ticks and the 13:00–15:00 quiet (user, 29.09.2026).
-const GIF_TICKS = Array.from({ length: 20 }, (_, i) => 600 + i * 30)
-  .filter((m) => !GRUMBLE_SLOTS.includes(m) && !(m >= MIDDAY_QUIET[0] && m < MIDDAY_QUIET[1]));
-// Not on Сусід's minute either: 30.09.2026 the GIF and his phrase both went at 10:30 — the next free tick then.
-export const gifMinute = (day) => {
-  const d = Date.parse(day) / 864e5;
-  if (d % 2 !== 0) return null;
-  const i = (d / 2) % GIF_TICKS.length, t = GIF_TICKS[i];
-  return t === neighbourMinute(day) ? GIF_TICKS[(i + 1) % GIF_TICKS.length] : t;
-};
-export const neighbourMinute = (day) => NEIGHBOUR_TICKS[((Date.parse(day) / 864e5) * 7) % NEIGHBOUR_TICKS.length];
+const EXTRA_TICKS = Array.from({ length: 10 }, (_, i) => 900 + i * 30).filter((m) => !GRUMBLE_SLOTS.includes(m));
+const dayNo = (day) => Date.parse(day) / 864e5;
+const extraKind = (day) => { const d = dayNo(day); return d % 2 === 1 ? "підколка" : (d / 2) % 2 === 0 ? "сусід" : "гіфка"; };
+const extraMinute = (day, kind) => (extraKind(day) === kind ? EXTRA_TICKS[(dayNo(day) * 7) % EXTRA_TICKS.length] : null);
+export const teaseMinute = (day) => extraMinute(day, "підколка");
+export const gifMinute = (day) => extraMinute(day, "гіфка");
+export const neighbourMinute = (day) => extraMinute(day, "сусід");
 
 // What the cron owes at a Kyiv day and minute of the day — the one schedule, read by scheduled() and by plan.mjs
 // (30.09.2026: a hand-copied plan.mjs would drift). Runtime guards (≥50 messages, already done, stock size, TEASE set,
@@ -1230,16 +1215,18 @@ if (import.meta.main) {
   assert.equal(grumbleSection(1020, 10), "загальне");
   assert.equal(grumbleSection(1110, 10), "вечір");
   assert.equal(grumbleSection(750, null), "обід");
-  const teases = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30"].map(teaseMinute);
-  assert.equal(teases.filter((m) => m != null).length, 3, String(teases));
-  assert.equal(teases[0], 1290, String(teases)); // 25.09 at 21:30
-  const gifs = ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"].map(gifMinute);
-  assert.equal(gifs.filter((m) => m != null).length, 2, String(gifs)); // every second day, the tease's off days
-  assert.ok(gifs.every((m) => m == null || (m >= 600 && m < 1200 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900))), String(gifs));
-  assert.ok(teases.every((m) => m == null || (m >= 960 && m <= 1380 && ![1260, 1320, ...GRUMBLE_SLOTS].includes(m))), String(teases));
-  const neighbourDays = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"].map(neighbourMinute);
-  assert.ok(neighbourDays.every((m) => m >= 540 && m < 1200 && m % 30 === 0 && !GRUMBLE_SLOTS.includes(m) && !(m >= 780 && m < 900)), String(neighbourDays));
-  assert.ok(new Set(neighbourDays).size > 1, "different days, different times");
+  { // 13.10.2026: one extra a day (tease / Сусід / GIF), always 15:00–19:30 off the grumble tick
+    const days = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10));
+    for (const day of days) {
+      const ms = [teaseMinute(day), neighbourMinute(day), gifMinute(day)].filter((m) => m != null);
+      assert.equal(ms.length, 1, day);
+      assert.ok(ms[0] >= 900 && ms[0] <= 1170 && ms[0] % 30 === 0 && !GRUMBLE_SLOTS.includes(ms[0]), `${day} ${ms[0]}`);
+    }
+    for (const [fn, n] of [[teaseMinute, 6], [neighbourMinute, 3], [gifMinute, 3]]) assert.equal(days.filter((d) => fn(d) != null).length, n, fn.name);
+    assert.ok(new Set(days.map((d) => teaseMinute(d) ?? neighbourMinute(d) ?? gifMinute(d))).size > 3, "different days, different times");
+    // Mornings are quiet: 08:00 grumble and nothing else till the 13:00 play and the 15:00 mark.
+    for (const day of days) for (let m = 0; m < 1440; m += 30) if (m > 480 && m < 900 && m !== 780) assert.ok(!due(day, m).some((x) => /бурчання|сусід|підколка|гіфка/.test(x)), `${day} ${m}`);
+  }
   assert.equal(grumbleSection(1020, null), "загальне");
   const g = parseGrumbles(readFileSync(new URL("../prompts/grumbles.txt", import.meta.url), "utf8"));
   for (const k of ["ранок", "тиша", "гаряче", "обід", "вечір", "загальне", "робота", "сусід"]) assert.ok(g[k]?.length >= 10, k);
@@ -1842,7 +1829,7 @@ if (import.meta.main) {
   assert.ok(selfPortrait("@babtsya_z_altanky_bot Збоченка. Тебе портрет просять намалювати") && selfPortrait("намалюй себе") && selfPortrait("намалюй твій портрет") && !selfPortrait("намалюй кота"));
   assert.ok(isStockPaint(REFUSE_PAINT[0]) && !isStockPaint("Такий собі кіт"));
   assert.ok(!/збоченк/i.test(drawSubject("@babtsya_z_altanky_bot Збоченка. намалюй кота")));
-  assert.deepEqual(GRUMBLE_SLOTS, [480, 690, 900, 1110]);
+  assert.deepEqual(GRUMBLE_SLOTS, [480, 1020]); // 13.10.2026
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot дай Артема") && !isDrawCmd("@babtsya_z_altanky_bot дай мені спокій") && !isDrawCmd("@babtsya_z_altanky_bot покажи, як ти малюєш"));
   assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
