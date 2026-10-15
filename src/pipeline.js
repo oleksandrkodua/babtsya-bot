@@ -151,7 +151,7 @@ export function due(day, m) {
   if (o && m < o.quietUntil) return ["тиша"];
   if (m === 120) out.push("закрити вчорашнє опитування");
   if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) out.push("хроніка тижня");
-  if (m >= 240 && m <= 330) out.push("запас м'яса");
+  if (m >= 150 && m <= 240) out.push("запас м'яса"); // 02:30–04:00, not the 02:00 tick that closes the poll
   if (m === MIDDAY_MINUTE) out.push("денна п'єса");
   if (hour >= 22 && !o) out.push("закрити опитування");
   if (m >= (o?.evening ?? 22 * 60)) out.push("вечірня п'єса");

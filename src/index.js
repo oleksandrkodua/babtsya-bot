@@ -52,6 +52,10 @@ const JUDGE = "Ти — редактор гумору. Тобі дають ро�
 // 29.09.2026 (user: "not very realistic"): FLUX.2 klein 4B first, ~105 neurons a 1024² picture (schnell ~60);
 // Leonardo / klein 9B / FLUX.2 dev are 1.3–3k — past the free tier. klein takes a multipart form, not JSON.
 const IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
+// The Lida meat photo only (15.10.2026, user): klein 9B, ~10x the price of 4B. MEAT_NEURONS is measured on the panel
+// (15.10.2026: Text-to-Image 1.39k → 2.75k after one picture, ≈1.36k).
+const MEAT_MODEL = "@cf/black-forest-labs/flux-2-klein-9b";
+const MEAT_NEURONS = 1400;
 const IMAGE_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
 // The poster gets the scene headings, not just the title: from a title alone it drew a sack of vegetables for
 // "від гепатиту до шлункової диверсії" (25.09.2026). One concrete moment of the day's main story.
@@ -179,7 +183,8 @@ export default {
     if (d.has("бурчання") && !posted && !afterMidday && (await once("бурчання"))) console.log(await grumble(env, now));
     if (d.has("сусід") && (await once("сусід"))) console.log(await grumble(env, now, "сусід"));
     if (d.has("підколка") && env.TEASE && (await once("підколка"))) console.log(await tease(env, target(env)).catch((e) => `tease: ${e.message}`));
-    // Night refill after the 03:00 neuron reset: one picture per tick 04:00–05:30 while the stock is short.
+    // Night refill 02:30–04:00 (15.10.2026, user): one picture per tick while the stock is short, so usually one a night.
+    // A tick before the 03:00 neuron reset can fail on an empty quota; the next one retries.
     if (d.has("запас м'яса") && env.TEASE) {
       const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM pics WHERE kind = 'meat' AND used IS NULL").first("n").catch(() => STOCK_MIN);
       if (left < STOCK_MIN) console.log(await stockMeat(env).catch((e) => `stock: ${e.message}`));
@@ -732,29 +737,29 @@ async function chronicle(env) {
 
 // A picture as base64 JPEG, or null — a failed picture never blocks the text it goes with.
 let lastDraw = "—"; // which model drew the last picture — shown in /run answers
-const klein = async (env, prompt) => {
+const klein = async (env, prompt, model = IMAGE_MODEL) => {
   const form = new FormData();
   for (const [k, v] of Object.entries({ prompt, width: "1024", height: "1024" })) form.append(k, v);
   const req = new Request("https://form", { method: "POST", body: form });
-  return (await env.AI.run(IMAGE_MODEL, { multipart: { body: req.body, contentType: req.headers.get("content-type") } }))?.image;
+  return (await env.AI.run(model, { multipart: { body: req.body, contentType: req.headers.get("content-type") } }))?.image;
 };
 // `alt` is the same prompt without a public figure's name: klein is retried once with it after a 3030 "flagged" (13.10.2026),
 // and schnell gets it too, the flagged text is not sent again.
 // wall (ms, 0 = none): a picture asked in the chat must be sent before waitUntil dies at ~30 s; klein once ran past it and the
 // ask got no reply at all (14.10.2026, the log stopped at "сцена готова"). Past the wall klein gives way to schnell, which is quicker.
 const within = (p, ms, what) => ms ? Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what}: довше ${ms / 1000} с`)), ms))]) : p;
-async function draw64(env, prompt, alt = "", wall = 0) {
+async function draw64(env, prompt, alt = "", wall = 0, model = IMAGE_MODEL, cost = PIC_NEURONS) {
   try {
-    const img = await within(klein(env, prompt), wall, "klein");
-    if (img) { lastDraw = "klein"; await spend(env, PIC_NEURONS); return img; }
+    const img = await within(klein(env, prompt, model), wall, "klein");
+    if (img) { lastDraw = model === IMAGE_MODEL ? "klein" : "klein-9b"; await spend(env, cost); return img; }
     lastDraw = "klein: порожньо";
   } catch (e) {
     console.log("draw klein:", e.message);
     lastDraw = `klein: ${e.message}`;
     if (alt && isFlagged(e.message)) {
       try {
-        const img = await klein(env, alt);
-        if (img) { lastDraw = "klein (без імені після 3030)"; await spend(env, PIC_NEURONS); return img; }
+        const img = await klein(env, alt, model);
+        if (img) { lastDraw = "klein (без імені після 3030)"; await spend(env, cost); return img; }
         lastDraw += "; повтор без імені: порожньо";
       } catch (e2) {
         console.log("draw klein (без імені):", e2.message);
@@ -810,7 +815,7 @@ const COMMITTEE = [
   "Would a hungry person want to eat this right now? Answer with only a number from 1 to 10.",
   "As a picture to tease a friend who is always eating: how tasty and eye-catching is it? Answer with only a number from 1 to 10.",
 ];
-const STOCK_MIN = 3; // fewer unused meat pictures than this → the night refill adds one per tick 04:00–05:30
+const STOCK_MIN = 3; // fewer unused meat pictures than this → the night refill adds one per tick 02:30–04:00
 async function committee(env, b64) {
   const ask = (q) => env.AI.run(MODEL, {
     messages: [{ role: "user", content: [{ type: "text", text: q }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } }] }],
@@ -823,7 +828,7 @@ async function committee(env, b64) {
 // One meat picture into the stock: drawn, scored, kept in D1 as base64 until the tease sends it. Nothing goes to
 // any chat (25.09.2026: "мені в особисті вже нічого не має слати").
 async function stockMeat(env) {
-  const b64 = await draw64(env, `${oneOf(MEATS)}, appetizing close-up food photo, rustic kitchen table, warm light.${NO_TEXT}`);
+  const b64 = await draw64(env, `${oneOf(MEATS)}, appetizing close-up food photo, rustic kitchen table, warm light.${NO_TEXT}`, "", 0, MEAT_MODEL, MEAT_NEURONS);
   if (!b64) return "stock: картинка не намалювалась";
   const { score, answers } = await committee(env, b64);
   if (score == null) return `stock: комітет не відповів (${answers.join(" / ")})`;
