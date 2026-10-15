@@ -9,12 +9,13 @@ import verseJudge from "../prompts/verse-judge.txt";
 import cursesText from "../prompts/curses.txt";
 import lexiconText from "../prompts/lexicon.txt";
 import politicsText from "../prompts/politics.txt";
+import cultureText from "../prompts/culture.txt";
 import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
   claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
-  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget
+  GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget, drawAsk, paintTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
 
@@ -24,7 +25,7 @@ const MIDDAY_MIN = 50; // midday runs only at 13:00 Kyiv (24.09.2026: a 15:30 su
 const EVENING_MIN = 50; // below it the evening is skipped and messages roll into the next digest
 const GRUMBLES = parseGrumbles(grumblesText);
 const CURSES = parseCurses(cursesText);
-const POLITICS = parseCurses(politicsText);
+const POLITICS = [...parseCurses(politicsText), ...parseCurses(cultureText)]; // reference sections: politics, then culture (14.10.2026)
 const BASES = { lexicon: parseCurses(lexiconText), openers: parseCurses(openersText), closers: parseCurses(closersText), blessings: parseCurses(blessingsText) };
 const COPY_MAX = 2; // more copied replicas than this → one rewrite call (25.09.2026)
 // Second corrector pass on plays only: the first one kept missing agreement and the vocative (25.09.2026).
@@ -108,9 +109,10 @@ export default {
         const missing = names.filter((n) => !people.some((p) => p.name === n));
         return new Response(`say: ${prefix.text}${text}${missing.length ? `\nбез тегу (ще не писали після оновлення): ${missing.join(", ")}` : ""}`);
       }
-      // ?kind=paint&text=«@babtsya_z_altanky_bot кличко в раді. чекаю малюнок» — the picture path as in the chat, to your private chat only (13.10.2026).
+      // ?kind=paint&text=«@babtsya_z_altanky_bot кличко в раді. чекаю малюнок»[&under=«@babtsya_z_altanky_bot намалюй мені мого кота»] — the picture path as in the chat, to your private chat only (13.10.2026).
       if (kind === "paint") {
-        const raw = url.searchParams.get("text") || "";
+        // &under=«текст» — the message the tag replies to: a bare tag under «намалюй …» draws it (14.10.2026)
+        const tag = url.searchParams.get("text") || "", under = url.searchParams.get("under") || "", raw = drawAsk(tag, under ? { text: under } : null) || tag;
         if (!isDrawCmd(raw)) return new Response(`НЕ розпізнано як прохання намалювати: «${raw}» (піде в текстову відповідь)`);
         const r = await paint(env, { chat: { id: env.TEST_CHAT_ID }, message_id: 0 }, "Ivan M", raw, "", null, "").catch((e) => `ЗБІЙ: ${e.stack || e.message}`);
         return new Response(`розпізнано як малюнок; тема: «${drawSubject(raw)}»\n${r || "—"} [${lastDraw}]`);
@@ -393,7 +395,7 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
 }
 
 // The picture itself: ~180 neurons, so with the day's budget gone (the "(N)" counter at 0) she says no, in her voice.
-async function paint(env, msg, name, raw, botText, other, pic = "") {
+async function paint(env, msg, name, raw, botText, other, pic = "", t0 = Date.now()) { // t0: the clock starts before the photo is read (14.10.2026)
   const send = (text) => telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
   if ((await left(env).catch(() => 1)) === 0) return send(oneOf(NO_PAINT)).then(() => (console.log(`Малюнок ${name}: немає нейронів`), "немає нейронів"));
   const subject = drawSubject(raw), self = selfPortrait(raw);
@@ -402,14 +404,14 @@ async function paint(env, msg, name, raw, botText, other, pic = "") {
   if (!subject && !ctx && !pic && !self) return send("Шо малювати, га? Скажи, шо саме.").then(() => "нічого малювати");
   // The background task dies ~30 s after the webhook answers and ai() sleeps 20 s between retries by default: the three
   // passes got deadlines and a short pause (13.10.2026, "друкує…" and then nothing), each falls back to the raw ask.
-  const t0 = Date.now();
   let scene = SELF_SCENE, intent = "";
   if (!self) {
     // 36 s for one picture (13.10.2026) is past the 30 s the background task lives: INTENT only when there is something to
     // resolve ("схоже" under a photo or a post); a plain ask goes to PAINT with the reference attached.
     const facts = factsHint(POLITICS, `${subject} ${ctx}`);
     let given = `Прохання: ${subject}\n${facts}`;
-    if (pic || ctx) {
+    if (pic && subject && !ctx) { intent = subject; given = `Прохання: ${subject}\nНа фото, на яке відповіли чи яке прикріплено: ${excerpt(pic, 500)}\n${facts}`; } // "намалюй мого кота" under a photo: the description goes straight to PAINT (14.10.2026, no reply at all: vision + INTENT + PAINT + draw ran past ~30 s)
+    else if (pic || ctx) {
       const ask = `Прохання: ${subject || "(намалювати те, про що йдеться в контексті)"}${pic ? `\nНа фото, на яке відповіли: ${excerpt(pic, 500)}` : ""}${ctx ? `\nТекст допису: ${excerpt(ctx, 400)}` : ""}\n${facts}`;
       intent = (await ai(env, INTENT, ask, 0.3, 130, 1500, t0 + 8000)).trim() || subject || excerpt(ctx, 200); // a failed pass falls back to the raw ask
       given = `Прохання: ${intent}`;
@@ -425,8 +427,9 @@ async function paint(env, msg, name, raw, botText, other, pic = "") {
     }
   }
   if (/^NO\b/i.test(scene)) return send(oneOf(REFUSE_PAINT)).then(() => (console.log(`Малюнок ${name}: відмова — ${subject}`), `відмова (NO двічі)\nзавдання: ${intent || "—"}`));
+  console.log(`Малюнок ${name}: сцена готова за ${Date.now() - t0} мс`); // finds the step that runs past the ~30 s (14.10.2026, two photo asks got no reply)
   const cartoon = cartoonize(scene), bare = namelessScene(cartoon);
-  const jpeg = scene ? await draw(env, POSTER_STYLE + cartoon + POSTER_END, bare === cartoon ? "" : POSTER_STYLE + bare + POSTER_END) : null; // no name → no retry
+  const jpeg = scene ? await draw(env, POSTER_STYLE + cartoon + POSTER_END, bare === cartoon ? "" : POSTER_STYLE + bare + POSTER_END, Math.max(7000, 16000 - (Date.now() - t0))) : null; // the chat must get its picture inside ~30 s; no name → no retry
   if (!jpeg) return send(NAP[Math.floor(Math.random() * NAP.length)]).then(() => (console.log(`Малюнок ${name}: без картинки [${lastDraw}]`), `без картинки (${Date.now() - t0} мс; ШІ: ${lastAi || "—"}; малюнок: ${lastDraw || "—"})\nзавдання: ${intent || "—"}\nсцена: ${scene || "порожня"}`));
   const count = await left(env).then((k) => ` (${k})`, () => "");
   await sendPhoto(env, msg.chat.id, jpeg, oneOf(PAINT_CAPS) + count, msg.message_id);
@@ -435,15 +438,16 @@ async function paint(env, msg, name, raw, botText, other, pic = "") {
 }
 
 async function answer(env, msg, name, raw, botText, other = null, news = "", photo = "") {
+  const ask = drawAsk(raw, other); // "" unless a picture is asked: by the tag itself or by a bare tag under someone's "намалюй …"
   // The last 20 messages, so she answers the conversation and not just the one line (25.09.2026).
   // ponytail: right after a play the table is emptied and there's little context until people write again.
   const { results } = await env.DB.prepare("SELECT name, text FROM messages WHERE message_id != ? ORDER BY ts DESC LIMIT 20").bind(msg.message_id).all();
   const context = tailFit(results.reverse().map((r) => contextLine(r.name, r.text)), 200, 3000).join("\n");
   // "Бабця з альтанки друкує…" while the chain runs; Telegram shows it for ~5 s, so it's renewed.
-  const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: isDrawCmd(raw) ? "upload_photo" : "typing" }).catch(() => {});
+  const typing = () => telegram(env, "sendChatAction", { chat_id: msg.chat.id, action: ask ? "upload_photo" : "typing" }).catch(() => {});
   typing();
   const tick = setInterval(typing, 4500);
-  if (isDrawCmd(raw)) return (photo && !selfPortrait(raw) ? look(env, photo) : Promise.resolve("")).then((pic) => paint(env, msg, name, raw, botText, other, pic)).catch((e) => (console.log(`Малюнок ${name}: збій — ${e.stack || e.message}`), telegram(env, "sendMessage", { chat_id: msg.chat.id, text: NAP[Math.floor(Math.random() * NAP.length)], reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } }).catch(() => {}))).finally(() => clearInterval(tick));
+  if (ask) { const t0 = Date.now(); return (photo && !selfPortrait(ask) ? look(env, photo) : Promise.resolve("")).then((pic) => (console.log(`Малюнок ${name}: початок, фото ${photo ? (pic ? "прочитано" : "не прочитано") : "нема"}, ${Date.now() - t0} мс`), paint(env, { ...msg, message_id: paintTarget(raw, other, msg.message_id) }, name, ask, botText, other, pic, t0))).catch((e) => (console.log(`Малюнок ${name}: збій — ${e.stack || e.message}`), telegram(env, "sendMessage", { chat_id: msg.chat.id, text: NAP[Math.floor(Math.random() * NAP.length)], reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } }).catch(() => {}))).finally(() => clearInterval(tick)); }
   const lean = (await left(env).catch(() => 1)) === 0; // no spend table yet → full replies
   const pic = photo ? await look(env, photo) : "";
   if (photo) console.log(`Фото для ${name}: ${pic || "не розгледіла"}`);
@@ -736,9 +740,12 @@ const klein = async (env, prompt) => {
 };
 // `alt` is the same prompt without a public figure's name: klein is retried once with it after a 3030 "flagged" (13.10.2026),
 // and schnell gets it too, the flagged text is not sent again.
-async function draw64(env, prompt, alt = "") {
+// wall (ms, 0 = none): a picture asked in the chat must be sent before waitUntil dies at ~30 s; klein once ran past it and the
+// ask got no reply at all (14.10.2026, the log stopped at "сцена готова"). Past the wall klein gives way to schnell, which is quicker.
+const within = (p, ms, what) => ms ? Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what}: довше ${ms / 1000} с`)), ms))]) : p;
+async function draw64(env, prompt, alt = "", wall = 0) {
   try {
-    const img = await klein(env, prompt);
+    const img = await within(klein(env, prompt), wall, "klein");
     if (img) { lastDraw = "klein"; await spend(env, PIC_NEURONS); return img; }
     lastDraw = "klein: порожньо";
   } catch (e) {
@@ -758,7 +765,7 @@ async function draw64(env, prompt, alt = "") {
   }
   try {
     lastDraw = `schnell (запасний; ${lastDraw})`;
-    const img = (await env.AI.run(IMAGE_FALLBACK, { prompt, steps: 4 }))?.image || null;
+    const img = (await within(env.AI.run(IMAGE_FALLBACK, { prompt, steps: 4 }), wall && Math.round(wall / 2), "schnell"))?.image || null;
     if (img) await spend(env, PIC_NEURONS);
     return img;
   } catch (e) {
@@ -767,8 +774,8 @@ async function draw64(env, prompt, alt = "") {
   }
 }
 const jpegBytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-const draw = async (env, prompt, alt = "") => {
-  const b64 = await draw64(env, prompt, alt);
+const draw = async (env, prompt, alt = "", wall = 0) => {
+  const b64 = await draw64(env, prompt, alt, wall);
   return b64 ? jpegBytes(b64) : null;
 };
 

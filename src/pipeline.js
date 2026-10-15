@@ -614,7 +614,9 @@ const editCast = (play, fn) => {
   const start = play.indexOf("Дійові особи:");
   if (start < 0) return play;
   const end = play.indexOf("\n\n", start), stop = end < 0 ? play.length : end;
-  return play.slice(0, start) + fn(play.slice(start, stop).split("\n")).join("\n") + play.slice(stop);
+  // "Дійові особи: A, B та інші." on the header line (14.10.2026) was taken for the header itself and never cleaned.
+  const lines = play.slice(start, stop).replace(/^Дійові особи:[ \t]+(?=\S)/, "Дійові особи:\n").split("\n");
+  return play.slice(0, start) + fn(lines).join("\n") + play.slice(stop);
 };
 
 // A member who speaks but is missing from «Дійові особи» (Nina, 24.09.2026) gets a neutral line there. Only real
@@ -752,8 +754,14 @@ const editDistance = (a, b) => {
   }
   return row[b.length];
 };
-const garbled = (w, real, known) => w !== real && !known.has(w) && w[0].toLowerCase() === real[0].toLowerCase()
-  && w.length >= real.length / 2 && w.length <= real.length * 2;
+// "Nikolay Коваль" for the sender "Николай Коваль" (14.10.2026): the model flips the first name's script, so the first-letter
+// check below fails. Same name in another script = transliteration within one edit.
+const TR = Object.fromEntries("а:a б:b в:v г:h ґ:g д:d е:e є:ye ж:zh з:z и:i і:i ї:yi й:y к:k л:l м:m н:n о:o п:p р:r с:s т:t у:u ф:f х:kh ц:ts ч:ch ш:sh щ:shch ы:y э:e ю:yu я:ya ь:".split(" ").map((p) => p.split(":")));
+const translit = (s) => [...s.toLowerCase()].map((c) => TR[c] ?? c).join("");
+const otherScript = (w, real) => /\p{Script=Cyrillic}/u.test(w) !== /\p{Script=Cyrillic}/u.test(real);
+const garbled = (w, real, known) => w !== real && !known.has(w) && (w[0].toLowerCase() === real[0].toLowerCase()
+  && w.length >= real.length / 2 && w.length <= real.length * 2
+  || otherScript(w, real) && w.length >= 4 && editDistance(translit(w), translit(real)) <= 1);
 // A nickname at the start of a line — a speaker ("Тарас (позіхаючи): …") or a cast line — becomes the Telegram name,
 // so castFix and the roll call see the member (29.09.2026: a member's short name sat in the cast undescribed).
 // Only a nickname of exactly one of today's senders: "Оля" or "Саша" belong to several and stay as they are.
@@ -795,6 +803,7 @@ export const parseAliases = (s = "") => new Map(s.split(";").map((p) => p.split(
 export function pointsAtOther(text, mentions, other, aliases = []) {
   if (!other) return false;
   const t = text.replace(/@babtsya_z_altanky_bot\b/gi, "");
+  if (!/\p{L}/u.test(t)) return true; // a bare tag under someone's message is meant for them (live, 14.10.2026: answered the one who tagged)
   if (mentions.some((m) => (m.id && m.id === other.uid) || (m.username && other.username && m.username.toLowerCase() === other.username.toLowerCase()))) return true;
   if ([...other.name.split(/\s+/), ...aliases].some((w) => /^\p{L}{3,}$/u.test(w) && new RegExp(`(?<![\\p{L}])${w}(?![\\p{L}])`, "iu").test(t))) return true;
   return AIMED.test(t) || AIMED_AT.test(t);
@@ -1058,6 +1067,11 @@ const HANDOVER = new RegExp("(?<![" + CYR + "])(?:скинь|скиньте|ки
 const NOT_DRAWN = /(?<![а-яіїєґё'’])(?:гіфк|гифк|мем|посилан|ссылк|номер|пароль|адрес|геолокац|файл|фото|відео|видео|стікер|ключ|гроші|гривн|деньг|рецепт|анекдот|жарт|вірш|стих|пісн|пораду|порад|совет|тост|привітан|загадк|гороскоп|гадан|таро|знати|знать|потім|потом|привіт|привет|грн|дякую|спасибі|відповід|ответ|скоро|пізніше|звістк|новин|інфу|інформаці)/iu;
 const handOver = (clean) => { const m = HANDOVER.exec(clean); return m && !NOT_DRAWN.test(clean.slice(m.index + m[0].length)) ? m : null; };
 export const isDrawCmd = (raw) => { const clean = raw.replace(/@\w+/g, " "); return DRAW_CMD.test(clean) || Boolean(handOver(clean)); };
+// The text that is the picture request: the tag's own words, or — for a bare tag under someone's "намалюй …" — that message
+// (owner, 14.10.2026). "" = not a drawing ask.
+export const drawAsk = (raw, other = null) => isDrawCmd(raw) ? raw : !/\p{L}/u.test(raw.replace(/@\w+/g, " ")) && other?.text && isDrawCmd(other.text) ? other.text : "";
+// Where the picture goes as a reply: a bare tag under someone's "намалюй …" answers that someone (14.10.2026), anything else the tag itself.
+export const paintTarget = (raw, other, messageId) => !isDrawCmd(raw) && drawAsk(raw, other) ? other.id : messageId;
 export const drawSubject = (raw) => {
   const clean = raw.replace(/@\w+/g, " "), m = DRAW_CMD.exec(clean) || handOver(clean);
   if (!m) return "";
@@ -1899,6 +1913,9 @@ if (import.meta.main) {
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot шо скажеш, бабцю?", [], lida), false);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot дай рецепт", [], lida), false);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot вразумі її", [], null), false);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot", [], lida), true); // bare tag as a reply: the addressee is the replied member
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot 👍", [], lida), true);
+  assert.equal(pointsAtOther("@babtsya_z_altanky_bot", [], null), false);
   const al = parseAliases("Lida 🐸 Kit: Ліда, Ліді, Лідусю; Taras: Тарасик");
   assert.deepEqual(al.get("Lida 🐸 Kit"), ["Ліда", "Ліді", "Лідусю"]);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot дай ліді рецепт", [], lida, al.get("Lida 🐸 Kit")), true);
@@ -1913,6 +1930,8 @@ if (import.meta.main) {
   const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Sergio Garcia Lopez"];
   assert.equal(fixNames("(Ніркослав Petrenko показав фото.)", ["Николай Petrenko"]), "(Николай Petrenko показав фото.)");
   assert.equal(fixNames("(Ніркослав Коваль показав фото тварини.)", ["Николай Коваль"]), "(Николай Коваль показав фото тварини.)");
+  assert.equal(fixNames("Nikolay Коваль: А Руслан? Він же лазить.", ["Николай Коваль"]), "Николай Коваль: А Руслан? Він же лазить."); // 14.10.2026
+  assert.equal(fixNames("Nikola Коваль мовчить, Dmytro Коваль теж.", ["Николай Коваль"]), "Николай Коваль мовчить, Dmytro Коваль теж.");
   assert.equal(fixNames("Nena Petrenko: Ну! Nina Petrenkov мовчить.", crew), "Nina Petrenko: Ну! Nina Petrenko мовчить.");
   assert.equal(fixNames("Bohdann: Корпус! А Bohdan мовчить.", crew), "Bohdan: Корпус! А Bohdan мовчить.");
   assert.equal(fixNames("Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.", crew), "Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.");
@@ -1935,6 +1954,13 @@ if (import.meta.main) {
   assert.equal(applyFixes("Ко: Бабця, ти каталась?\n(Бабця, як завжди, мовчить.)", "").text, "Ко: Бабцю, ти каталась?\n(Бабця, як завжди, мовчить.)");
   assert.equal(castShuffle("Дійові особи:\nA — а\nB — б\nC — в\nта інші мешканці двору\n\nA: Ну!", () => 0),
     "Дійові особи:\nB — б\nC — в\nA — а\nта інші мешканці двору\n\nA: Ну!");
+  { // 14.10.2026: the list of everyone sits on the header line itself
+    const who = ["Ivan M", "Petro", "Zoya"];
+    const raw = "Дійові особи: Ivan M, Petro, Zoya та інші.\nZoya - плаче\nPetro — думає\n\nZoya: Ну!";
+    assert.equal(castShuffle(castClean(raw, new Map(), who), () => 0),
+      "Дійові особи:\nPetro — думає\nZoya — плаче\nта інші мешканці двору\n\nZoya: Ну!");
+    assert.equal(castClean("Дійові особи: Ivan M, Petro, Zoya\nZoya — плаче\n\nZoya: Ну!", new Map(), who), "Дійові особи:\nZoya — плаче\n\nZoya: Ну!");
+  }
   { // 02.10.2026 screenshot: a list-of-everyone line in the middle, Danylo = Hnat twice, bare members
     const tags = new Map([["Hnat", "Бубон"]]), who = ["Hnat", "Petro", "Zoya"];
     const raw = "Дійові особи:\nDanylo «Бубон» - мріє про котів\nZoya — тримає пульс\nHnat, Petro, Zoya та інші.\nHnat «Бубон»\n\nDanylo: Ну!\nPetro: Так.";
@@ -2040,6 +2066,10 @@ if (import.meta.main) {
     assert.match(factsHint(pol, "намалюй мера Кличко в верховній раді"), /Віталій Кличко/);
     assert.match(factsHint(pol, "шо там Трамп?"), /47-й президент/);
     assert.equal(factsHint(pol, "скільки коштує хліб?"), "");
+    const cul = parseCurses(readFileSync(new URL("../prompts/culture.txt", import.meta.url), "utf8")); // culture reference (14.10.2026)
+    for (const [q, name] of [["хто написав Кобзар", "Шевченко"], ["Лісова пісня", "Леся Українка"], ["За двома зайцями", "Кіно класика"], ["Океан Ельзи", "Музика рок і поп"], ["намалюй мені ніч", "Музика старе"], ["русскій воєнний корабль", "Мемні фрази"], ["Жадан новий роман", "Сучасна література"]]) assert.match(factsHint(cul, q), new RegExp(name), q);
+    assert.equal(factsHint(cul, "скільки коштує хліб? бабця, привіт"), "");
+    assert.ok(cul.every((x) => x.items.length && x.re));
     // variants checked live-style on 13.10.2026: Ukrainian, Russian, surzhyk spellings and the words around the people
     for (const [q, name] of [["Терехов шо казав", "Терехов"], ["мэр Киева", "Кличко"], ["Банкова мовчить", "Банкова"], ["Ющєнко отруївся", "Ющенко"], ["Тимошенку посадили", "Тимошенко"], ["Стефанчука бачила", "Стефанчук"], ["Верховная Рада приняла", "Верховна Рада"], ["Ермак ушёл", "Єрмак"], ["Кабмин решил", "Кабінет міністрів"], ["Зєля шо", "Зеленський"]]) assert.match(factsHint(pol, q), new RegExp(name), q);
     assert.equal(factsHint(pol, "приватний будинок, привід для радості, садові товариства"), "");
@@ -2049,6 +2079,19 @@ if (import.meta.main) {
   assert.equal(drawSubject("@babtsya_z_altanky_bot кличка в верховній раді намалюй кошолка стара"), "кличка в верховній раді"); // "кошолка" is an insult to her, not a basket (13.10.2026)
   for (const q of ["кличко в раді. чекаю малюнок", "чекаю картинку кличка в раді", "жду картинку: кличко в раде", "хочу малюнок кота", "потрібна картинка трактора", "малюнок: кличко в раді"]) assert.ok(isDrawCmd(`@babtsya_z_altanky_bot ${q}`), q);
   assert.equal(drawSubject("@babtsya_z_altanky_bot кличко в раді. чекаю малюнок"), "кличко в раді");
+  { // a bare tag under someone's drawing ask draws it (14.10.2026); anything else keeps the old rules
+    const T = "@babtsya_z_altanky_bot", cat = { name: "Iron", text: `${T} намалюй мені мого кота`, id: 5 };
+    assert.equal(drawAsk(T, cat), cat.text);
+    assert.equal(drawAsk(`${T} малюй`, null), `${T} малюй`);
+    assert.equal(drawAsk(T, { ...cat, text: "що за кіт?" }), "");
+    assert.equal(drawAsk(`${T} ну і як тобі?`, cat), "");
+    assert.equal(drawAsk(T, null), "");
+    assert.equal(drawSubject(drawAsk(T, cat)), "мого кота");
+    assert.equal(paintTarget(T, cat, 9), 5); // bare tag: the picture answers the one who asked
+    assert.equal(paintTarget(`${T} малюй`, cat, 9), 9); // own words: the tag's own message
+    assert.equal(paintTarget(T, { ...cat, text: "що за кіт?" }, 9), 9);
+    assert.equal(paintTarget(T, null, 9), 9);
+  }
   assert.ok(!isDrawCmd("@babtsya_z_altanky_bot хочу сказати про малюнок") && !isDrawCmd("@babtsya_z_altanky_bot цей малюнок гарний") && !isDrawCmd("@babtsya_z_altanky_bot треба купити хліб"));
   assert.equal(drawSubject("@babtsya_z_altanky_bot можешь нарисовать кота пожалуйста"), "кота");
   assert.equal(drawSubject("@babtsya_z_altanky_bot намалюй хропіллу  стара ти карга"), "хропіллу"); // the address to her is not the subject (09.10.2026)
