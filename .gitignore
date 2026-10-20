@@ -14,3 +14,5 @@ logs/last-plan-*.txt
 evidence/
 ChatExport*/
 logs/said-*.json
+logs/chronicle-*
+logs/people-notes-*

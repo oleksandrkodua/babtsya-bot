@@ -758,6 +758,10 @@ const editDistance = (a, b) => {
 // check below fails. Same name in another script = transliteration within one edit.
 const TR = Object.fromEntries("а:a б:b в:v г:h ґ:g д:d е:e є:ye ж:zh з:z и:i і:i ї:yi й:y к:k л:l м:m н:n о:o п:p р:r с:s т:t у:u ф:f х:kh ц:ts ч:ch ш:sh щ:shch ы:y э:e ю:yu я:ya ь:".split(" ").map((p) => p.split(":")));
 const translit = (s) => [...s.toLowerCase()].map((c) => TR[c] ?? c).join("");
+// The same member's name in another script or with a suffix is one person (20.10.2026: people_notes had "Oleksandr" and
+// "Олександр", "Nikolay Коваль" and "Николай Коваль", "…, esquire" twice, and the second one overwrote a fuller note).
+const noteKey = (n) => translit(displayName(n)).replace(/[^a-z0-9]+/g, " ").trim();
+export const sameName = (a, b) => { const x = noteKey(a), y = noteKey(b); return x.length >= 4 && (x === y || editDistance(x, y) <= 1 && x[0] === y[0]); };
 const otherScript = (w, real) => /\p{Script=Cyrillic}/u.test(w) !== /\p{Script=Cyrillic}/u.test(real);
 const garbled = (w, real, known) => w !== real && !known.has(w) && (w[0].toLowerCase() === real[0].toLowerCase()
   && w.length >= real.length / 2 && w.length <= real.length * 2
@@ -1196,6 +1200,18 @@ export function capReply(text, cap) {
   const sp = cut.lastIndexOf(" ");
   return (sp > 0 ? cut.slice(0, sp) : cut).replace(/[\s,;:—-]+$/, "");
 }
+// Chronicle lines under a total cap, whole lines only; a long line is cut at a word first (20.10.2026: slice(0, 3000) left "…природності вол"
+// as the next chunk's "previous chronicle", and one 1500-char line ate the budget of ten others).
+export function capLines(lines, total, per) {
+  const out = [];
+  let len = 0;
+  for (const l of lines.map((x) => capReply(x, per))) {
+    if (len + l.length + 1 > total) break;
+    out.push(l);
+    len += l.length + 1;
+  }
+  return out.join("\n");
+}
 // What goes out: her own instructions never (30.09.2026), a stock line instead of silence.
 export const replyOut = (said, leaked, nap) => leaked ? LEAK_REPLY : said || nap;
 export const replyTarget = ({ to, name, other, messageId }) => to && to !== name && other ? other.id : messageId; // reply to the member she answers
@@ -1602,6 +1618,18 @@ if (import.meta.main) {
   assert.equal(rollCall(lossy, ["✙Petro Bez✙"]), lossy);
   assert.equal(displayName("Iron Grey Owl, esquire"), "Iron Grey Owl");
   assert.equal(displayName("Ivan M"), "Ivan M");
+  // 20.10.2026: the same member in two scripts / with a suffix is one row of people_notes
+  assert.ok(sameName("Oleksandr", "Олександр") && sameName("Nikolay Коваль", "Николай Коваль") && sameName("Iron Grey Owl, esquire", "Iron Grey Owl"));
+  assert.ok(!sameName("Oleksandr", "Mykola.Pr")); // a different account name: left to the owner
+  assert.ok(!sameName("Lida", "Nina") && !sameName("Petro", "Sergio Garcia Lopez 🇺🇦") && !sameName("Kit Kotsky", "Bohdan Zavadskyi")); // no pair here that make-public.sh maps to one name
+  {
+    const long = "- " + "слово, ".repeat(200); // one 1400-char line
+    const out = capLines([long, "- коротко", "- ще"], 3000, 450).split("\n");
+    assert.ok(out[0].length <= 450 && !/[\s,;:—-]$/.test(out[0]) && out[1] === "- коротко" && out.length === 3);
+    const many = Array.from({ length: 30 }, (_, i) => `- пункт ${i} ` + "а".repeat(200));
+    const cut = capLines(many, 3000, 450);
+    assert.ok(cut.length <= 3000 && cut.split("\n").every((l) => /а$/.test(l)) && cut.split("\n").length === 14);
+  }
   const chatNews = ["[09:00] Ivan M: Сайт на маїл ру виглядає як NV але там немає українських новин", "[09:05] Nina: (відповідь Ivan M) а курку я віддала тещі ще вчора ввечері"];
   const copyPlay = "(Сцена 1. Ранок.)\nIvan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!\nNina: Курку я віддала тещі ще вчора ввечері.\n(Тиша.)\n\nМораль: сайт на маїл ру виглядає як NV але там";
   assert.deepEqual(copiedLines(copyPlay, chatNews), ["Ivan M: Я бачу ІПСО. Сайт на маїл ру виглядає як NV, але там немає українських новин!"]);
