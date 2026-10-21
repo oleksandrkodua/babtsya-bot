@@ -588,22 +588,17 @@ export const ticFree = (drafts, asked) => {
   return drafts.filter((d) => ticCount(d, asked) === least);
 };
 
-// "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. The limit is taken as the
-// last 24 hours, not a UTC day (seen twice 30.09; Cloudflare's docs say 00:00 UTC — rolling is the stricter of the two).
-// Both plays fall in any 24 h ahead, so for each one: what is spent in the 24 h before it (rows that slid out no longer
-// count), the plays up to it, and the small daily stuff pro rata, must leave room. Measured: a play with poster
-// ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
+// "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. The limit is a UTC day: the panel
+// showed "used today 3.67k/10k" at 16:00 Kyiv on 21.10.2026 while the last 24 h summed to 11.3k, and the rolling model had said (5)
+// for a ~11 (the counter resets at 00:00 UTC = 03:00 Kyiv). So: what is spent since 00:00 UTC, the plays still to come before
+// the next 00:00 UTC, and the small daily stuff pro rata for the rest of the day, must leave room.
+// Measured: a play with poster ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
 export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
 export function repliesLeft(rows, nowMs, offsetSec) {
-  const DAY = 864e5, next = (h) => {
-    let t = Math.floor(nowMs / DAY) * DAY + h * 36e5 - offsetSec * 1000 - DAY;
-    while (t <= nowMs) t += DAY;
-    return t;
-  };
-  const room = PLAY_HOURS.map(next).sort((a, b) => a - b).map((t, i) => NEURONS_DAY
-    - rows.filter((r) => r.ts * 1000 > t - DAY).reduce((s, r) => s + r.neurons, 0)
-    - PLAY_NEURONS * (i + 1) - OTHER_NEURONS * (t - nowMs) / DAY);
-  return Math.max(0, Math.floor(Math.min(...room) / REPLY_NEURONS));
+  const DAY = 864e5, start = Math.floor(nowMs / DAY) * DAY, end = start + DAY;
+  const spent = rows.filter((r) => r.ts * 1000 >= start).reduce((s, r) => s + r.neurons, 0);
+  const plays = PLAY_HOURS.filter((h) => { const t = start + h * 36e5 - offsetSec * 1000; return t > nowMs && t < end; }).length;
+  return Math.max(0, Math.floor((NEURONS_DAY - spent - PLAY_NEURONS * plays - OTHER_NEURONS * (end - nowMs) / DAY) / REPLY_NEURONS));
 }
 
 export const warFallback = (play, chat) =>
@@ -1695,7 +1690,7 @@ if (import.meta.main) {
   // 20.10.2026: the same member in two scripts / with a suffix is one row of people_notes
   assert.ok(sameName("Oleksandr", "Олександр") && sameName("Nikolay Коваль", "Николай Коваль") && sameName("Iron Grey Owl, esquire", "Iron Grey Owl"));
   assert.ok(!sameName("Oleksandr", "Mykola.Pr")); // a different account name: left to the owner
-  assert.ok(!sameName("Lida", "Nina") && !sameName("Petro", "Sergio Garcia Lopez 🇺🇦") && !sameName("Kit Kotsky", "Bohdan Zavadskyi")); // no pair here that make-public.sh maps to one name
+  assert.ok(!sameName("Lida", "Nina") && !sameName("Petro", "Pablo Ruiz Diaz 🇺🇦") && !sameName("Kit Kotsky", "Bohdan Zavadskyi")); // no pair here that make-public.sh maps to one name
   {
     const same = parseAliases("Main Name: Other Name (nick); Third: Fourth");
     assert.equal(canonName("Other Name (nick)", same), "Main Name");
@@ -1746,15 +1741,15 @@ if (import.meta.main) {
     ["[10:00] Lida: я знову купила ковбасу на всю пенсію"]), []);
   assert.equal(dropName("Тарасе, не сци.", "Тарас"), "Тарасе, не сци.");
   assert.equal(dropName("Тарас, не сци.", "Тарас"), "Не сци.");
-  { // 04.10.2026: replies left before the next two plays, rolling 24 h
-    const now = Date.UTC(2026, 9, 4, 9), kyivOff = 3 * 3600; // 12:00 Kyiv: midday at 13:00 (+1 h), evening at 22:00 (+10 h)
-    assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - 2 * PLAY_NEURONS - OTHER_NEURONS * 10 / 24) / REPLY_NEURONS)); // 11
-    const late = Date.UTC(2026, 9, 3, 20) / 1000; // a late play yesterday at 23:00 Kyiv — still inside tonight's window
-    assert.equal(repliesLeft([{ ts: late, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 10 / 24) / REPLY_NEURONS)); // 5
-    const onTime = Date.UTC(2026, 9, 3, 19) / 1000; // 22:00 Kyiv yesterday: out of tonight's window, so only 13:00 counts it
-    assert.equal(repliesLeft([{ ts: onTime, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - PLAY_NEURONS - OTHER_NEURONS / 24) / REPLY_NEURONS));
-    const old = Date.UTC(2026, 9, 3, 8) / 1000; // 11:00 Kyiv yesterday: slides out before 13:00
-    assert.equal(repliesLeft([{ ts: old, neurons: 9000 }], now, kyivOff), repliesLeft([], now, kyivOff));
+  { // 21.10.2026: replies left in the UTC day (resets 03:00 Kyiv), minus the plays still to come today
+    const now = Date.UTC(2026, 9, 4, 9), kyivOff = 3 * 3600; // 12:00 Kyiv: midday at 13:00 and evening at 22:00 both ahead
+    assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 14
+    const yesterday = Date.UTC(2026, 9, 3, 20) / 1000; // 23:00 Kyiv yesterday: already another day for the counter
+    assert.equal(repliesLeft([{ ts: yesterday, neurons: 9000 }], now, kyivOff), repliesLeft([], now, kyivOff));
+    const today = Date.UTC(2026, 9, 4, 1) / 1000;
+    assert.equal(repliesLeft([{ ts: today, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 8
+    const after = Date.UTC(2026, 9, 4, 12); // 15:00 Kyiv: midday is behind, only the evening one is ahead
+    assert.equal(repliesLeft([], after, kyivOff), Math.floor((NEURONS_DAY - PLAY_NEURONS - OTHER_NEURONS * 12 / 24) / REPLY_NEURONS));
     assert.equal(repliesLeft([{ ts: now / 1000 - 60, neurons: 9999 }], now, kyivOff), 0);
   }
   { // 03.10.2026: "пафосу, ніби ти тут …" in two replies running
@@ -2051,7 +2046,7 @@ if (import.meta.main) {
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], lida, two.get(lida.name)), true);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], zina, two.get(zina.name)), true);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], taras, two.get(taras.name)), false);
-  const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Sergio Garcia Lopez"];
+  const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Pablo Ruiz Diaz"];
   assert.equal(fixNames("(Ніркослав Petrenko показав фото.)", ["Николай Petrenko"]), "(Николай Petrenko показав фото.)");
   assert.equal(fixNames("(Ніркослав Коваль показав фото тварини.)", ["Николай Коваль"]), "(Николай Коваль показав фото тварини.)");
   assert.equal(fixNames("Nikolay Коваль: А Руслан? Він же лазить.", ["Николай Коваль"]), "Николай Коваль: А Руслан? Він же лазить."); // 14.10.2026
@@ -2059,7 +2054,7 @@ if (import.meta.main) {
   assert.equal(fixNames("Nena Petrenko: Ну! Nina Petrenkov мовчить.", crew), "Nina Petrenko: Ну! Nina Petrenko мовчить.");
   assert.equal(fixNames("Bohdann: Корпус! А Bohdan мовчить.", crew), "Bohdan: Корпус! А Bohdan мовчить.");
   assert.equal(fixNames("Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.", crew), "Сьогодні Petrenko мовчав. Дав Олександрові й Тарасу.");
-  assert.equal(fixNames("Sergio Garcia Lopez: Ліцензія! Taras: Так.", crew), "Sergio Garcia Lopez: Ліцензія! Taras: Так.");
+  assert.equal(fixNames("Pablo Ruiz Diaz: Ліцензія! Taras: Так.", crew), "Pablo Ruiz Diaz: Ліцензія! Taras: Так.");
   { // 02.10.2026: the evening play lost its head in a rewrite → no title, no poster, no cast
     const full = "«Назва»\n\nДійові особи:\nA — а\nта інші мешканці двору\n\n(Сцена 1. Двір.)\nA: Ну!";
     assert.equal(keepHead(full, "(Сцена 1. Двір.)\nA: Ну."), "«Назва»\n\nДійові особи:\nA — а\nта інші мешканці двору\n\n(Сцена 1. Двір.)\nA: Ну.");
