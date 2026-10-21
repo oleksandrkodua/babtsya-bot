@@ -1134,15 +1134,72 @@ export const namelessScene = (scene) => {
 };
 export const isFlagged = (message) => /\b3030\b/.test(String(message));
 export const isStockPaint = (t) => [...NO_PAINT, ...REFUSE_PAINT].some((x) => t.startsWith(x.slice(0, 25)));
+// Stock lines (21.10.2026: 2 + 2 + 3 grew to 10 + 10 + 38, one a day was too repetitive). isStockPaint tells them by the first 25
+// chars, so no two NO_PAINT / REFUSE_PAINT lines may start alike (checked in the self-check). The caption gets " (N)" after it.
 export const NO_PAINT = [
   "Фарби на сьогодні скінчились, пензлик висох. Проси завтра, бабця ще й не таке намалює.",
   "Бабця сьогодні вже намалювала все, шо могла. Завтра приходь із олівцем.",
+  "Мольберт на сьогодні зачинено. Приходь завтра, як фарби привезуть.",
+  "Бабця сьогодні вичерпана, як рахунок за світло. Малюнок - завтра.",
+  "Пензлик у відпустці до завтра, а бабця при ньому. Не штовхай.",
+  "Усі кольори на сьогодні розібрали. Завтра підвезуть, тоді й малюватиму.",
+  "Бабця сьогодні вже на нулі: ні фарб, ні сил. Завтра, добре?",
+  "Сьогодні мистецтво закрите на переоблік. Приходь завтра.",
+  "Тюбики порожні, бабця пуста. Малюнок переноситься на завтра.",
+  "Оце ти не вчасно: фарби скінчились. Завтра - будь ласка.",
 ];
 export const REFUSE_PAINT = [
   "Такого бабця не малює - проси шось пристойне, а то пензлик відвернеться.",
   "Ні, оце малювати не буду. Придумай шось людське.",
+  "Це бабця малювати не стане - совість не дозволяє. Придумай шось гарніше.",
+  "Ні, пензлик такого не торкнеться. Проси про щось людське.",
+  "Е ні, оце хай малює хто безсоромніший. Бабця - ні.",
+  "На таке бабця фарб не витрачає. Давай інше прохання.",
+  "Це ти вже занадто. Кота, квіти, хату - малюватиму, а оце ні.",
+  "Бабця має принципи і сухий пензлик. Оце малювати не буду.",
+  "Не буде такого малюнка. Скажи шось пристойніше - тоді й поговоримо.",
+  "Мій пензлик на таке не підписувався. Проси інше.",
 ];
-export const PAINT_CAPS = ["Ось, малювала на колінці - не вередуй.", "Тримай шедевр, пензлик ще мокрий.", "Намалювала, як побачила. Не подобається - дивись у вікно."];
+export const PAINT_CAPS = [
+  "Ось, малювала на колінці - не вередуй.",
+  "Тримай шедевр, пензлик ще мокрий.",
+  "Намалювала, як побачила. Не подобається - дивись у вікно.",
+  "Бабця старалась, аж язик прикусила. Оцінюй мовчки.",
+  "Вийшло, як вийшло. Пікассо теж не одразу став Пікассом.",
+  "Фарби - останні, нерви - теж. Дивись і радій.",
+  "Чесно кажучи, на дев'ять з половиною з десяти. Половину пензлик винен.",
+  "Малювала при свічці, бо світло вимкнули. Тому така глибина.",
+  "Оце тобі і весь Лувр. Квиток не треба.",
+  "Бабця не художниця, бабця - душа. А душа так бачить.",
+  "Ось. У рамку не вішай, на холодильник можна.",
+  "Малювала-малювала, аж окуляри запітніли. Дивись уважно.",
+  "Таку красу тільки на альтанці й побачиш. Лови.",
+  "Пензлик тремтів, але бабця не здалась. Результат перед тобою.",
+  "На, подавись красою. Бабця ще й не таке вміє.",
+  "Оце так, оце шедевр. Скажеш, шо ні - пензлик образиться.",
+  "Бабця малює серцем, а серце в мене з характером.",
+  "Готово. Підпису не ставлю: скромність дорожча за гроші.",
+  "Малювала, поки борщ вистигав. Борщ, до речі, вийшов гірше.",
+  "Це не криво, це такий напрям. Сучасне мистецтво, воно таке.",
+  "Дивись, поки фарба не висохла. Потім дорожче буде.",
+  "Бабця зробила, шо могла. Решту додумай, уява в тебе є.",
+  "Пів тюбика пішло на одне небо. Ціни на фарби знаєш?",
+  "Малювала сидячи, бо ноги вже не ті. Але рука тримає.",
+  "Ось тобі картинка, а мені - слово добре за труд.",
+  "Тримай. Якщо шось не так - це не помилка, це задум.",
+  "Бабця взяла кольори, шо були. Жовтого, правда, не вистачило.",
+  "Старалась, як на конкурс. Журі, на жаль, у відпустці.",
+  "Дарую безкоштовно, але вдячність приймаю натурою: пиріжками.",
+  "Ну шо ти дивишся? Малювала, як умію. Краще - спробуй.",
+  "Оце з першого разу вийшло. Шо мовчиш, де оплески?",
+  "Малюнок готовий, бабця втомилась. Каву ставимо?",
+  "Тут усе, шо замовляли, і ще трошки від бабці.",
+  "Дивись, як воно в бабці виходить, коли не заважають.",
+  "Це тобі від бабці - на пам'ять і на подив.",
+  "Фарба ще волога, не чіпай пальцями, бо буде не шедевр, а відбиток.",
+  "Малювала на одному диханні, тепер на іншому доживаю.",
+  "Хай буде, шо буде. Бабця пішла чай пити.",
+];
 // Just the command ("продовж вірш") — the start is shown to the model once, in its own block, not again inside the ask.
 export const verseCommand = (raw) => VERSE_CMD.exec(raw.replace(/@\w+/g, " "))?.[0] ?? bareParse(raw)?.cmd ?? raw;
 // What draft() appends to every hint. A verse topic has its own length and comparison rules: "до 12 рядків" and "одне
@@ -1201,16 +1258,27 @@ export function capReply(text, cap) {
   return (sp > 0 ? cut.slice(0, sp) : cut).replace(/[\s,;:—-]+$/, "");
 }
 // Chronicle lines under a total cap, whole lines only; a long line is cut at a word first (20.10.2026: slice(0, 3000) left "…природності вол"
-// as the next chunk's "previous chronicle", and one 1500-char line ate the budget of ten others).
-export function capLines(lines, total, per) {
+// as the next chunk's "previous chronicle", and one 1500-char line ate the budget of ten others). Over `max` lines the END goes: the top is
+// the long memory (memes, local words), and keeping the newest 20 wiped it out of the 21.10.2026 run (29 lines asked down to 16).
+export function capLines(lines, total, per, max = Infinity) {
   const out = [];
   let len = 0;
-  for (const l of lines.map((x) => capReply(x, per))) {
+  for (const l of lines.slice(0, max).map((x) => capReply(x, per))) {
     if (len + l.length + 1 > total) break;
     out.push(l);
     len += l.length + 1;
   }
   return out.join("\n");
+}
+// One line of the model's notes → [name, note] or null. 21.10.2026: the model echoed the template ("Ім'я: Ivan M: …" made a member
+// called "Ім'я"), wrote a row about the bot itself and one about a phantom ("Alex the Fixer: (згадка в контексті …)").
+// A name with a colon is a line the lazy regex stretched to the next colon because the note ran over the cap ("Ім'я: Ivan M" was such a row).
+export function parseNoteLine(line) {
+  const m = line.replace(/[*#_]/g, "").replace(/^\s*[-•]?\s*(?:ім['’ʼ]я\s*:\s*)?/i, "").match(/^(.{2,40}?):\s*(.{5,400})$/);
+  if (!m) return null;
+  const name = m[1].trim(), note = m[2].trim();
+  if (/^ім['’ʼ]я$/i.test(name) || name.toLowerCase() === BOT_NAME.toLowerCase() || name.includes(":") || note.startsWith("(")) return null;
+  return [name, note];
 }
 // What goes out: her own instructions never (30.09.2026), a stock line instead of silence.
 export const replyOut = (said, leaked, nap) => leaked ? LEAK_REPLY : said || nap;
@@ -1622,6 +1690,19 @@ if (import.meta.main) {
   assert.ok(sameName("Oleksandr", "Олександр") && sameName("Nikolay Коваль", "Николай Коваль") && sameName("Iron Grey Owl, esquire", "Iron Grey Owl"));
   assert.ok(!sameName("Oleksandr", "Mykola.Pr")); // a different account name: left to the owner
   assert.ok(!sameName("Lida", "Nina") && !sameName("Petro", "Sergio Garcia Lopez 🇺🇦") && !sameName("Kit Kotsky", "Bohdan Zavadskyi")); // no pair here that make-public.sh maps to one name
+  assert.deepEqual(parseNoteLine("Ivan M: футбол, мемчики."), ["Ivan M", "футбол, мемчики."]);
+  assert.deepEqual(parseNoteLine("- Ім'я: Ivan M: футбол, мемчики."), ["Ivan M", "футбол, мемчики."]);
+  assert.deepEqual(parseNoteLine("ІМ’Я: Zoya: коти й просекко."), ["Zoya", "коти й просекко."]);
+  assert.equal(parseNoteLine("Ім'я: щось там написано довго"), null);
+  assert.equal(parseNoteLine(`${BOT_NAME}: «стара мочалка», «колгоспниця».`), null);
+  assert.equal(parseNoteLine("Alex the Fixer: (згадка в контексті KalVados)."), null);
+  assert.equal(parseNoteLine(`Pino: Ivan M: ${"а".repeat(395)}`), null); // note over the cap: not a member called "Pino: Ivan M"
+  assert.ok(parseNoteLine(`Kit Kotsky: ${"а".repeat(390)}`) && !parseNoteLine(`Kit Kotsky: ${"а".repeat(401)}`)); // 400, not 300
+  {
+    const many = Array.from({ length: 30 }, (_, i) => `- пункт ${i}`);
+    const kept = capLines(many, 3000, 450, 20).split("\n");
+    assert.ok(kept.length === 20 && kept[0] === "- пункт 0" && kept.at(-1) === "- пункт 19"); // the first 20, the long memory
+  }
   {
     const long = "- " + "слово, ".repeat(200); // one 1400-char line
     const out = capLines([long, "- коротко", "- ще"], 3000, 450).split("\n");
@@ -2057,6 +2138,15 @@ if (import.meta.main) {
     assert.equal(namelessScene("The elephant's tusk, a trump card and a Harris tweed jacket in a Costa cafe."), "The elephant's tusk, a trump card and a Harris tweed jacket in a Costa cafe."); // common words stay
   }
   assert.ok(isStockPaint(REFUSE_PAINT[0]) && !isStockPaint("Такий собі кіт"));
+  // 21.10.2026: the picture lines grew; isStockPaint cuts at 25 chars, so the stubs must start differently, and every line must stay in the voice
+  {
+    const stubs = [...NO_PAINT, ...REFUSE_PAINT];
+    assert.ok(NO_PAINT.length >= 10 && REFUSE_PAINT.length >= 10 && PAINT_CAPS.length >= 30);
+    assert.equal(new Set(stubs.map((x) => x.slice(0, 25))).size, stubs.length);
+    assert.ok(stubs.every(isStockPaint) && !PAINT_CAPS.some(isStockPaint));
+    assert.equal(new Set(PAINT_CAPS).size, PAINT_CAPS.length);
+    assert.ok([...stubs, ...PAINT_CAPS].every((x) => x.length <= 120 && !/[—–]/.test(x) && !/голуб|ЖЕК|маршрутк|терор|війн/i.test(x) && /^[^A-Za-z]*$/.test(x)));
+  }
   assert.ok(!/збоченк/i.test(drawSubject("@babtsya_z_altanky_bot Збоченка. намалюй кота")));
   { // "намагання" (13.10.2026): the word is swapped by code, her own tic-ridden replies are recognised
     assert.equal(tidy("Це як намагання знайти ключ, і Намагатися дарма."), "Це як спроба знайти ключ, і Пробувати дарма.");

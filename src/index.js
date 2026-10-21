@@ -14,7 +14,7 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, sameName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget, drawAsk, paintTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -704,9 +704,9 @@ async function memory(env) {
 
 // B: every Monday the week's plans are folded into the previous chronicle — stories that run between days, memes,
 // local words, nicknames. Cumulative, so after a month she knows the chat. No health, family or private life.
-const CHRONICLE = "Ти — літописиця двору. Тобі дають попередню хроніку двору й плани випусків за тиждень. Онови хроніку: до 15 коротких пунктів, кожен рядок починається з «- ». Лише життя двору: історії, що тягнуться між днями, повторювані жарти й меми, місцеві слова й прізвиська, спільні справи сусідів. Нове додай, застаріле й разове прибери. НЕ пиши: новини, політику, війну, обстріли, зброю, фронт; адреси й телефони; оцінки людей; як влаштований сам бот чи коли він що публікує. Кожен пункт — одна тема, до 200 знаків, без склеювання тем через «;». Блок «ХТО Є ХТО» каже, хто яке прізвисько чи ім'я в житті має: не плутай людей між собою, а одну людину пиши однією формою імені. Без заголовків, без зірочок і жирного — лише рядки «- …».";
+const CHRONICLE = "Ти — літописиця двору. Тобі дають попередню хроніку двору й плани випусків за тиждень. Онови хроніку: до 20 коротких пунктів, кожен рядок починається з «- ». Лише життя двору: історії, що тягнуться між днями, повторювані жарти й меми, місцеві слова й прізвиська, спільні справи сусідів. Нове додай. Давні меми, прізвиська, місцеві слова й історії, що тягнуться між днями, НЕ прибирай і не скорочуй до одного слова: прибирай лише разові події старші за тиждень. НЕ пиши: новини, політику, війну, обстріли, зброю, фронт; адреси й телефони; оцінки людей; як влаштований сам бот чи коли він що публікує. Кожен пункт — одна тема, до 200 знаків, без склеювання тем через «;». Схожі теми об'єднуй в один пункт (їжа, кулінарні жарти — один пункт, не шість). Блок «ХТО Є ХТО» каже, хто яке прізвисько чи ім'я в житті має: не плутай людей між собою, а одну людину пиши однією формою імені. Без заголовків, без зірочок і жирного — лише рядки «- …».";
 // C (PEOPLE_NOTES = "1"): what each member is known for, updated every Monday; read by the reply brief.
-const NOTES = "Тобі дають попередні нотатки про учасників сусідського чату й нові плани випусків. Онови нотатки: для кожного учасника, що є в нотатках чи в планах, — один рядок «Ім'я: …» — чим він відомий у дворі: теми, захоплення, повторювані жарти, улюблені слівця. Нове додай, застаріле прибери, старе, що й далі правда, лиши. Без здоров'я, родини, адрес, роботи, грошей, оцінок і особистого життя. Блок «ХТО Є ХТО» каже, хто яке прізвисько чи ім'я в житті має: не плутай людей між собою, а одну людину пиши одним записом. Лише рядки «Ім'я: …», нічого більше.";
+const NOTES = "Тобі дають попередні нотатки про учасників сусідського чату й нові плани випусків. Онови нотатки: для кожного учасника, що є в нотатках чи в планах, — один рядок: справжнє ім'я учасника, двокрапка, опис (слова «Ім'я» в рядку нема) — чим він відомий у дворі: теми, захоплення, повторювані жарти, улюблені слівця. Нове додай, застаріле прибери, старе, що й далі правда, лиши. Без здоров'я, родини, адрес, роботи, грошей, оцінок і особистого життя. Блок «ХТО Є ХТО» каже, хто яке прізвисько чи ім'я в житті має: не плутай людей між собою, а одну людину пиши одним записом. Опис до 300 знаків, без прозвищ із блоку «ХТО Є ХТО». Лише ці рядки, нічого більше.";
 // A long week goes chunk by chunk, each folded into the chronicle (and notes) so far. The whole chat's history was
 // learnt once from the export instead (row week = 'історія', 29.09.2026).
 async function chronicle(env) {
@@ -722,22 +722,22 @@ async function chronicle(env) {
     // Only "- " lines survive: headings, a bare "—" (the empty previous chronicle echoed) and markdown stars go (26.09.2026).
     // A cut answer loses its last line, the cap keeps whole lines (20.10.2026: both weeks ended mid-word at 3000).
     const lines = tidy(await ai(env, CHRONICLE, `${who}ПОПЕРЕДНЯ ХРОНІКА:\n${text || "(ще нема)"}\n\nПЛАНИ ЗА ТИЖДЕНЬ:\n${chunk}`, 0.3, 1600))
-      .split("\n").map((l) => l.replace(/[*#_]/g, "").trim()).filter((l) => /^[-•]\s*\S/.test(l)).map((l) => l.replace(/^[-•]\s*/, "- "));
+      .split("\n").map((l) => l.replace(/[*#_]/g, "").trim()).filter((l) => /^[-•]\s*\S/.test(l)).map((l) => l.replace(/^[-•]\s*/, "- ")).filter((l) => !/«\s*»/.test(l)); // «» = a quote the model emptied (21.10.2026)
     if (lastCut) lines.pop();
-    const next = capLines(lines, 3000, 450);
+    const next = capLines(lines, 3000, 450, 20);
     if (next) text = next;
     if (env.PEOPLE_NOTES === "1") {
       const { results: old } = await env.DB.prepare("SELECT name, notes FROM people_notes").all();
       // 1500 tokens covered ~15 of 28 members, the rest never refreshed, and the cut last line overwrote a full note (20.10.2026).
       const lines = (await ai(env, NOTES, `${who}ПОПЕРЕДНІ НОТАТКИ:\n${old.map((o) => `${o.name}: ${o.notes}`).join("\n") || "(ще нема)"}\n\nПЛАНИ:\n${chunk}`, 0.3, 4000))
-        .split("\n").map((l) => l.replace(/[*#_]/g, "").match(/^\s*[-•]?\s*(.{2,40}?):\s*(.{5,300})$/)).filter(Boolean);
+        .split("\n").map(parseNoteLine).filter(Boolean);
       if (lastCut) lines.pop();
       // The same member in another script or with a suffix goes to the row that already exists, not to a new one.
       const names = old.map((o) => o.name);
-      const rows = lines.map(([, name, note]) => {
-        const n = name.trim(), row = names.find((x) => sameName(x, n)) ?? n;
+      const rows = lines.map(([n, note]) => {
+        const row = names.find((x) => sameName(x, n)) ?? n;
         if (!names.includes(row)) names.push(row);
-        return [row, note.trim()];
+        return [row, note];
       });
       if (rows.length) await env.DB.batch(rows.map(([name, note]) => env.DB.prepare("INSERT INTO people_notes (name, notes, updated) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET notes = excluded.notes, updated = excluded.updated").bind(name, note, now)));
       notes += rows.length;
