@@ -1280,6 +1280,12 @@ export function parseNoteLine(line) {
   if (/^ім['’ʼ]я$/i.test(name) || name.toLowerCase() === BOT_NAME.toLowerCase() || name.includes(":") || note.startsWith("(")) return null;
   return [name, note];
 }
+// One member under two Telegram names ("Main: Other", SAME_PEOPLE, 21.10.2026 — the owner: two names, one person) is one row of
+// people_notes and one lookup. Two different people with similar names stay apart (the owner: Mykola.Pr and Олександр).
+export const canonName = (name, same) => {
+  for (const [main, forms] of same) if (main === name || forms.includes(name)) return main;
+  return name;
+};
 // What goes out: her own instructions never (30.09.2026), a stock line instead of silence.
 export const replyOut = (said, leaked, nap) => leaked ? LEAK_REPLY : said || nap;
 export const replyTarget = ({ to, name, other, messageId }) => to && to !== name && other ? other.id : messageId; // reply to the member she answers
@@ -1690,6 +1696,15 @@ if (import.meta.main) {
   assert.ok(sameName("Oleksandr", "Олександр") && sameName("Nikolay Коваль", "Николай Коваль") && sameName("Iron Grey Owl, esquire", "Iron Grey Owl"));
   assert.ok(!sameName("Oleksandr", "Mykola.Pr")); // a different account name: left to the owner
   assert.ok(!sameName("Lida", "Nina") && !sameName("Petro", "Sergio Garcia Lopez 🇺🇦") && !sameName("Kit Kotsky", "Bohdan Zavadskyi")); // no pair here that make-public.sh maps to one name
+  {
+    const same = parseAliases("Main Name: Other Name (nick); Third: Fourth");
+    assert.equal(canonName("Other Name (nick)", same), "Main Name");
+    assert.equal(canonName("Main Name", same), "Main Name");
+    assert.equal(canonName("Fourth", same), "Third");
+    assert.equal(canonName("Somebody", same), "Somebody");
+    assert.equal(canonName(undefined, same), undefined);
+    assert.equal(canonName("Main Name", parseAliases("")), "Main Name");
+  }
   assert.deepEqual(parseNoteLine("Ivan M: футбол, мемчики."), ["Ivan M", "футбол, мемчики."]);
   assert.deepEqual(parseNoteLine("- Ім'я: Ivan M: футбол, мемчики."), ["Ivan M", "футбол, мемчики."]);
   assert.deepEqual(parseNoteLine("ІМ’Я: Zoya: коти й просекко."), ["Zoya", "коти й просекко."]);

@@ -14,7 +14,7 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, canonName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget, drawAsk, paintTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -341,7 +341,8 @@ async function compose(env, name, raw, botText, temperature = REPLY_TEMP, contex
   // What the yard knows about the author and whom he answers (people_notes, learnt from the whole chat, 29.09.2026);
   // stored names are full ("…, esquire"), chat names are cut at the comma.
   const { results: noted } = await env.DB.prepare("SELECT name, notes FROM people_notes").all().catch(() => ({ results: [] }));
-  const known = noted.filter((r) => [name, other?.name].includes(displayName(r.name))).map((r) => `${displayName(r.name)}: ${r.notes}`).join("\n");
+  const same = parseAliases(env.SAME_PEOPLE), canon = (x) => canonName(x, same); // two Telegram names, one member
+  const known = noted.filter((r) => [canon(name), canon(other?.name)].includes(canon(displayName(r.name)))).map((r) => `${displayName(r.name)}: ${r.notes}`).join("\n");
   const titles = [...parseAliases(env.TITLES)].filter(([n]) => present.has(n)).map(([n, f]) => `${n} — «${f.join(", ")}»`).join("; ");
   const talk = `${gender}${aka ? `ХТО Є ХТО (імена в житті): ${aka}.\n\n` : ""}${titles ? `ПІДПИСИ В ГРУПІ (жартівливі звання, можна підколоти): ${titles}.\n\n` : ""}${known ? `ЩО ДВІР ЗНАЄ ПРО НИХ (теми й жарти людини — для пункту ПАМ'ЯТЬ, не переказуй):\n${known}\n\n` : ""}${context ? `РОЗМОВА ПЕРЕД ЦИМ (лише щоб зрозуміти, про що мова):\n${context}\n\n` : ""}`;
   const asked = replyAsk({ name, shown, botText, other, news, pic, verse, rhymeWord });
@@ -715,7 +716,9 @@ async function chronicle(env) {
     .bind(now - 7 * 86400).all();
   if (!results.length) return "chronicle: нема планів";
   const chunks = packChunks(results.map((r) => `${r.day} ${r.kind}:\n${r.plan}`));
-  const who = `ХТО Є ХТО (прізвиська й імена в житті): ${[...parseAliases(env.ALIASES)].map(([n, f]) => `${n} — ${f.join(", ")}`).join("; ")}\n\n`;
+  const same = parseAliases(env.SAME_PEOPLE);
+  const one = [...same].map(([m, f]) => `${m} і ${f.join(", ")} — одна людина, пиши її одним рядком «${m}: …»`).join("; ");
+  const who = `ХТО Є ХТО (прізвиська й імена в житті): ${[...parseAliases(env.ALIASES)].map(([n, f]) => `${n} — ${f.join(", ")}`).join("; ")}${one ? `; ${one}` : ""}\n\n`;
   let text = (await env.DB.prepare("SELECT text FROM chronicle WHERE week != 'історія' ORDER BY created DESC LIMIT 1").first("text")) || "";
   let notes = 0;
   for (const chunk of chunks) {
@@ -734,8 +737,8 @@ async function chronicle(env) {
       if (lastCut) lines.pop();
       // The same member in another script or with a suffix goes to the row that already exists, not to a new one.
       const names = old.map((o) => o.name);
-      const rows = lines.map(([n, note]) => {
-        const row = names.find((x) => sameName(x, n)) ?? n;
+      const rows = lines.map(([n0, note]) => {
+        const n = canonName(n0, same), row = names.find((x) => sameName(x, n)) ?? n;
         if (!names.includes(row)) names.push(row);
         return [row, note];
       });
