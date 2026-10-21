@@ -99,4 +99,4 @@ npx wrangler deploy
 | `DEPLOY.md` | розгортання від нуля |
 
 License
-This project is licensed under the MIT [License](https://github.com/oleksandrkodua/babtsya-bot/blob/main/licence).
+This project is licensed under the MIT [License](licence).
