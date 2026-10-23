@@ -151,7 +151,7 @@ export function due(day, m) {
   if (o && m < o.quietUntil) return ["тиша"];
   if (m === 120) out.push("закрити вчорашнє опитування");
   if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) out.push("хроніка тижня");
-  if (m >= 150 && m <= 240) out.push("запас м'яса"); // 02:30–04:00, not the 02:00 tick that closes the poll
+  if (m >= 180 && m <= 240) out.push("запас м'яса"); // 03:00–04:00 (23.10.2026): after the 00:00 UTC neuron reset, the day's budget is fresh
   if (m === MIDDAY_MINUTE) out.push("денна п'єса");
   if (hour >= 22 && !o) out.push("закрити опитування");
   if (m >= (o?.evening ?? 22 * 60)) out.push("вечірня п'єса");
@@ -810,6 +810,15 @@ export function pointsAtOther(text, mentions, other, aliases = []) {
 
 // The picture committee: three single-number answers (appetizing, realistic, flawless), averaged to one decimal.
 // Garbage answers don't vote; no valid vote at all → null, and the picture isn't stocked.
+// Which meat theme the night picture draws (23.10.2026): not one of the last few. A stocked picture's file_id ends with
+// "-m<index>"; older rows have no suffix and exclude nothing. At most count - 1 themes are excluded, so a choice always remains.
+export function pickMeat(count, recentIds, rand = Math.random) {
+  const seen = [...new Set(recentIds.map((id) => /-m(\d+)$/.exec(id)?.[1]).filter((i) => i != null).map(Number))].filter((i) => i < count);
+  const free = [...Array(count).keys()].filter((i) => !seen.includes(i));
+  const pool = free.length ? free : [...Array(count).keys()];
+  return pool[Math.floor(rand() * pool.length)];
+}
+
 export function committeeScore(answers) {
   const votes = answers.map((a) => Number(String(a).match(/\d+/)?.[0])).filter((n) => n >= 1 && n <= 10);
   return votes.length ? Math.round((votes.reduce((s, n) => s + n, 0) / votes.length) * 10) / 10 : null;
@@ -2021,6 +2030,12 @@ if (import.meta.main) {
   assert.equal(committeeScore(["7", "8.", "Score: 9"]), 8);
   assert.equal(committeeScore(["3", "не знаю", "10"]), 6.5);
   assert.equal(committeeScore(["", "0", "11"]), null);
+  // Night meat picture (23.10.2026): the theme is never one of the last three stocked.
+  assert.equal(pickMeat(6, ["pic-1-m0", "pic-2-m1", "pic-3-m2"], () => 0), 3);
+  assert.equal(pickMeat(6, ["pic-1-m0", "pic-2-m1", "pic-3-m2"], () => 0.99), 5);
+  assert.equal(pickMeat(6, ["pic-1", "pic-2"], () => 0), 0); // rows from before the suffix exclude nothing
+  assert.equal(pickMeat(2, ["pic-1-m0", "pic-2-m1"], () => 0), 0); // everything seen: any theme again
+  assert.equal(pickMeat(6, ["pic-1-m9"], () => 0), 0); // an index past the list is ignored
   const lida = { name: "Lida 🐸 Kit", username: "lida_k", uid: 7 };
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot вразумі її", [], lida), true);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot ну скажи їй щось", [], lida), true);

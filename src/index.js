@@ -14,7 +14,7 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, canonName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
+  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, canonName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, pickMeat, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText,
   GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget, drawAsk, paintTarget
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -52,8 +52,8 @@ const JUDGE = "Ти — редактор гумору. Тобі дають ро�
 // 29.09.2026 (user: "not very realistic"): FLUX.2 klein 4B first, ~105 neurons a 1024² picture (schnell ~60);
 // Leonardo / klein 9B / FLUX.2 dev are 1.3–3k — past the free tier. klein takes a multipart form, not JSON.
 const IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
-// The Lida meat photo only (15.10.2026, user): klein 9B, ~10x the price of 4B. MEAT_NEURONS is measured on the panel
-// (15.10.2026: Text-to-Image 1.39k → 2.75k after one picture, ≈1.36k).
+// The Lida meat photo only (15.10.2026, user): klein 9B, ~10x the price of 4B (panel 15.10: ≈1.36k a picture).
+// 23.10.2026: FLUX.2 dev tried for one night picture — the panel showed ≈8k neurons (80% of the free day) for one 1024² picture, back to 9B.
 const MEAT_MODEL = "@cf/black-forest-labs/flux-2-klein-9b";
 const MEAT_NEURONS = 1400;
 const IMAGE_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
@@ -183,8 +183,8 @@ export default {
     if (d.has("бурчання") && !posted && !afterMidday && (await once("бурчання"))) console.log(await grumble(env, now));
     if (d.has("сусід") && (await once("сусід"))) console.log(await grumble(env, now, "сусід"));
     if (d.has("підколка") && env.TEASE && (await once("підколка"))) console.log(await tease(env, target(env)).catch((e) => `tease: ${e.message}`));
-    // Night refill 02:30–04:00 (15.10.2026, user): one picture per tick while the stock is short, so usually one a night.
-    // A tick before the 03:00 neuron reset can fail on an empty quota; the next one retries.
+    // Night refill 03:00–04:00 Kyiv (23.10.2026, user): one picture per tick while the stock is short, so usually one a night.
+    // Run after the 00:00 UTC neuron reset (03:00 Kyiv in summer, 02:00 in winter); a failed tick is retried by the next one.
     if (d.has("запас м'яса") && env.TEASE) {
       const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM pics WHERE kind = 'meat' AND used IS NULL").first("n").catch(() => STOCK_MIN);
       if (left < STOCK_MIN) console.log(await stockMeat(env).catch((e) => `stock: ${e.message}`));
@@ -766,10 +766,11 @@ const klein = async (env, prompt, model = IMAGE_MODEL) => {
 // wall (ms, 0 = none): a picture asked in the chat must be sent before waitUntil dies at ~30 s; klein once ran past it and the
 // ask got no reply at all (14.10.2026, the log stopped at "сцена готова"). Past the wall klein gives way to schnell, which is quicker.
 const within = (p, ms, what) => ms ? Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what}: довше ${ms / 1000} с`)), ms))]) : p;
-async function draw64(env, prompt, alt = "", wall = 0, model = IMAGE_MODEL, cost = PIC_NEURONS) {
+// fallback = false: the klein failure ends the call, no schnell picture is drawn (and paid for) in its place.
+async function draw64(env, prompt, alt = "", wall = 0, model = IMAGE_MODEL, cost = PIC_NEURONS, fallback = true) {
   try {
     const img = await within(klein(env, prompt, model), wall, "klein");
-    if (img) { lastDraw = model === IMAGE_MODEL ? "klein" : "klein-9b"; await spend(env, cost); return img; }
+    if (img) { lastDraw = model === IMAGE_MODEL ? "klein" : "meat-model"; await spend(env, cost); return img; }
     lastDraw = "klein: порожньо";
   } catch (e) {
     console.log("draw klein:", e.message);
@@ -786,6 +787,7 @@ async function draw64(env, prompt, alt = "", wall = 0, model = IMAGE_MODEL, cost
       prompt = alt;
     }
   }
+  if (!fallback) return null;
   try {
     lastDraw = `schnell (запасний; ${lastDraw})`;
     const img = (await within(env.AI.run(IMAGE_FALLBACK, { prompt, steps: 4 }), wall && Math.round(wall / 2), "schnell"))?.image || null;
@@ -846,12 +848,14 @@ async function committee(env, b64) {
 // One meat picture into the stock: drawn, scored, kept in D1 as base64 until the tease sends it. Nothing goes to
 // any chat (25.09.2026: "мені в особисті вже нічого не має слати").
 async function stockMeat(env) {
-  const b64 = await draw64(env, `${oneOf(MEATS)}, appetizing close-up food photo, rustic kitchen table, warm light.${NO_TEXT}`, "", 0, MEAT_MODEL, MEAT_NEURONS);
-  if (!b64) return "stock: картинка не намалювалась";
+  const recent = (await env.DB.prepare("SELECT file_id FROM pics WHERE kind = 'meat' ORDER BY created DESC LIMIT 3").all().catch(() => ({ results: [] }))).results.map((r) => r.file_id);
+  const theme = pickMeat(MEATS.length, recent);
+  const b64 = await draw64(env, `${MEATS[theme]}, appetizing close-up food photo, rustic kitchen table, warm light.${NO_TEXT}`, "", 0, MEAT_MODEL, MEAT_NEURONS, false); // 23.10.2026: a schnell meat picture went into the stock; only the meat model's picture is kept
+  if (!b64) return `stock: м'ясна модель не намалювала [${lastDraw}]`;
   const { score, answers } = await committee(env, b64);
   if (score == null) return `stock: комітет не відповів (${answers.join(" / ")})`;
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare("INSERT INTO pics (file_id, kind, score, created, data) VALUES (?, 'meat', ?, ?, ?)").bind(`pic-${Date.now()}`, score, now, b64).run();
+  await env.DB.prepare("INSERT INTO pics (file_id, kind, score, created, data) VALUES (?, 'meat', ?, ?, ?)").bind(`pic-${Date.now()}-m${theme}`, score, now, b64).run();
   return `stock: ${score} (${answers.map((x) => x.trim()).join(" / ")})`;
 }
 
