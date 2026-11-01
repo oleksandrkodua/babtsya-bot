@@ -396,12 +396,13 @@ test('poll migration preserves references and counters and admits another poll o
   assert.deepEqual(legacy.sql.prepare('PRAGMA table_info(polls)').all(), new DB().sql.prepare('PRAGMA table_info(polls)').all());
 });
 
-test('digest reserve lasts through retries, releases on completion, and resets with the UTC day',()=>{
+test('digest reserve lasts through retries, releases on completion, and the spend leaves the 24-hour window',()=>{
   const spent=[{ts:Date.parse('2026-11-01T17:00:00Z')/1000,neurons:7900}],off=7200;
   const before=Date.parse('2026-11-01T19:59:00Z'),during=Date.parse('2026-11-01T20:01:00Z');
   assert.equal(pipeline.repliesLeft(spent,before,off),0);assert.equal(pipeline.repliesLeft(spent,during,off),0);
   assert.ok(pipeline.repliesLeft(spent,during,off,false,['evening'])>0);
-  assert.ok(pipeline.repliesLeft(spent,Date.parse('2026-11-02T00:01:00Z'),off)>0);
+  assert.equal(pipeline.repliesLeft(spent,Date.parse('2026-11-02T00:01:00Z'),off),0); // 02.11.2026: still inside 24 h after the UTC reset
+  assert.ok(pipeline.repliesLeft(spent,Date.parse('2026-11-02T17:01:00Z'),off)>0); // 24 h later it is free again
 });
 
 test('committee accounts all three successful responses',async()=>{
@@ -540,8 +541,8 @@ test('test-mode digest never exceeds the hard limit after its prefix is added', 
   assert.equal(db.sql.prepare('SELECT count(*) n FROM digests').get().n, 0);
 });
 
-test('confirmed daily quota overrides estimates across requests and expires at UTC midnight', async () => {
-  const { db, env } = fixture(); let clock = Date.parse('2026-11-01T12:00:00Z'), calls = 0;
+test('confirmed daily quota overrides estimates across requests and is retried after the hold, not at UTC midnight', async () => {
+  const { db, env } = fixture(); let clock = Date.parse('2026-11-01T23:40:00Z'), calls = 0;
   Date.now = () => clock;
   env.AI.run = async () => { calls++; throw Error('4006: you have used up your daily free allocation of 10,000 neurons'); };
   await worker.ai(env, 'system', 'question', 0.2, 100, 0);
@@ -549,16 +550,26 @@ test('confirmed daily quota overrides estimates across requests and expires at U
   assert.equal(await worker.left(env), 0);
   await worker.ai({ ...env }, 'system', 'another question', 0.2, 100, 0);
   assert.equal(calls, 1);
-  clock = Date.parse('2026-11-02T00:00:00Z');
+  clock = Date.parse('2026-11-02T00:10:00Z'); // 02.11.2026: the UTC date changed, the hold did not
+  assert.equal(await worker.left(env), 0);
+  await worker.ai({ ...env }, 'system', 'still held', 0.2, 100, 0);
+  assert.equal(calls, 1);
+  clock = Date.parse('2026-11-02T00:41:00Z'); // an hour after the denial
   assert.ok(await worker.left(env) > 0);
+  await worker.ai({ ...env }, 'system', 'retry', 0.2, 100, 0);
+  assert.equal(calls, 2); // one retry goes through and is denied again
+  assert.equal(await worker.left(env), 0); // the new denial holds for another hour
+  clock = Date.parse('2026-11-02T01:42:00Z');
   env.AI.run = async () => completion('Знову працюємо.');
   assert.equal(await worker.ai(env, 'system', 'question', 0.2), 'Знову працюємо.');
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM ticks WHERE key='ai-limit'").get().n, 0); // success clears the flag
+  assert.ok(await worker.left(env) > 0);
 });
 
 test('scheduled digest probes a recorded quota once and clears it only on success', async () => {
   for (const available of [false, true]) {
     const { db, env, sent } = fixture(); seed(db);
-    const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+    const key = 'ai-limit';
     db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
     const run = env.AI.run; let calls = 0;
     env.AI.run = async (...args) => { calls++; if (!available) throw Error('4006: daily free allocation'); return run(...args); };
@@ -572,7 +583,7 @@ test('scheduled digest probes a recorded quota once and clears it only on succes
 
 test('a successful quota probe cannot erase a newer denial', async () => {
   const { db, env } = fixture(); seed(db);
-  const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+  const key = 'ai-limit';
   db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
   const run = env.AI.run; let first = true;
   env.AI.run = async (...args) => {
@@ -587,7 +598,7 @@ test('a successful quota probe cannot erase a newer denial', async () => {
 
 test('ordinary replies stay blocked during a scheduled quota probe', async () => {
   const { db, env, sent } = fixture(); seed(db);
-  const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+  const key = 'ai-limit';
   db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
   let release, started; const gate = new Promise((ok) => { release = ok; });
   const entered = new Promise((ok) => { started = ok; });
@@ -604,7 +615,7 @@ test('ordinary replies stay blocked during a scheduled quota probe', async () =>
 
 test('manual and keep-preview digests do not bypass an existing quota denial', async () => {
   const { db, env } = fixture(); seed(db);
-  db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(`ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`, now());
+  db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run('ai-limit', now());
   let calls = 0; env.AI.run = async () => { calls++; return completion(plan); };
   await worker.digest(env, '2026-11-01', 'manual');
   await worker.digest(env, '2026-11-01', 'evening', true);

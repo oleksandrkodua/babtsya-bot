@@ -592,17 +592,17 @@ export const ticFree = (drafts, asked) => {
   return drafts.filter((d) => ticCount(d, asked) === least);
 };
 
-// "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. The limit is a UTC day: the panel
-// showed "used today 3.67k/10k" at 16:00 Kyiv on 21.10.2026 while the last 24 h summed to 11.3k, and the rolling model had said (5)
-// for a ~11 (the counter resets at 00:00 UTC = 03:00 Kyiv). So: what is spent since 00:00 UTC, the plays still to come before
-// the next 00:00 UTC, and the small daily stuff pro rata for the rest of the day, must leave room.
+// "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. On 21.10.2026 the panel said
+// "used today 3.67k/10k" while the last 24 h summed to 11.3k, so the count moved to the UTC day. Then 4006 came with a low panel
+// (24.10: 1.37k "today", ≈10.4k over 24 h; 01.11: ≈4.2k "today", the rolling sum crossed 10k at ~14:00 by `spend`), so the answer is
+// the smaller of two: the UTC day and the last 24 h. The plays still to come and the small daily stuff pro rata stay reserved either way.
 // Measured: a play with poster ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
 export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
 // No midday play today (24.10.2026, limits): the evening one takes two halves of the chat, so it gets a bigger reserve.
 export const MISSED_MIDDAY_NEURONS = 1200;
 export function repliesLeft(rows, nowMs, offsetSec, middayMissed = false, done = [], active = false) {
   const DAY = 864e5, start = Math.floor(nowMs / DAY) * DAY, end = start + DAY;
-  const spent = rows.filter((r) => r.ts * 1000 >= start).reduce((s, r) => s + r.neurons, 0);
+  const sum = (from) => rows.filter((r) => r.ts * 1000 >= from).reduce((s, r) => s + r.neurons, 0);
   const outstanding = PLAY_HOURS.filter((h) => {
     const kind = h === 13 ? "midday" : "evening", t = start + h * 36e5 - offsetSec * 1000;
     const deadline = t + (h === 13 ? 1 : 2) * 36e5;
@@ -610,7 +610,9 @@ export function repliesLeft(rows, nowMs, offsetSec, middayMissed = false, done =
   });
   const plays = Math.max(outstanding.length, active ? 1 : 0);
   const extra = middayMissed && (outstanding.includes(22) || active) ? MISSED_MIDDAY_NEURONS : 0;
-  return Math.max(0, Math.floor((NEURONS_DAY - spent - PLAY_NEURONS * plays - extra - OTHER_NEURONS * (end - nowMs) / DAY) / REPLY_NEURONS));
+  const reserve = PLAY_NEURONS * plays + extra + OTHER_NEURONS * (end - nowMs) / DAY;
+  const room = (spent) => Math.max(0, Math.floor((NEURONS_DAY - spent - reserve) / REPLY_NEURONS));
+  return Math.min(room(sum(start)), room(sum(nowMs - DAY)));
 }
 
 export const warFallback = (play, chat) =>
@@ -1771,7 +1773,7 @@ if (import.meta.main) {
     const now = Date.UTC(2026, 9, 4, 9), kyivOff = 3 * 3600; // 12:00 Kyiv: midday at 13:00 and evening at 22:00 both ahead
     assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 14
     const yesterday = Date.UTC(2026, 9, 3, 20) / 1000; // 23:00 Kyiv yesterday: already another day for the counter
-    assert.equal(repliesLeft([{ ts: yesterday, neurons: 9000 }], now, kyivOff), repliesLeft([], now, kyivOff));
+    assert.equal(repliesLeft([{ ts: yesterday, neurons: 9000 }], now, kyivOff), 0); // 02.11.2026: yesterday's 9000 is inside the last 24 h, the UTC-day count alone said 14
     const today = Date.UTC(2026, 9, 4, 1) / 1000;
     assert.equal(repliesLeft([{ ts: today, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 8
     const after = Date.UTC(2026, 9, 4, 12); // 15:00 Kyiv: midday is behind, only the evening one is ahead
@@ -1783,6 +1785,15 @@ if (import.meta.main) {
     assert.ok(repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff, true) < repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff)); // 23:00: retries still need the extra reserve
     const late = Date.UTC(2026, 9, 4, 21); // 00:00 Kyiv: evening retries have expired
     assert.equal(repliesLeft([], late, kyivOff, true), repliesLeft([], late, kyivOff));
+    // 02.11.2026: smaller of the UTC day and the last 24 h (01.11: ≈4.2k "today", over 10k in 24 h → 4006)
+    const evening = Date.UTC(2026, 9, 4, 11, 30); // 14:30 Kyiv
+    const burst = [{ ts: Date.UTC(2026, 9, 3, 17) / 1000, neurons: 7000 }, { ts: Date.UTC(2026, 9, 4, 1) / 1000, neurons: 1400 }, { ts: Date.UTC(2026, 9, 4, 11) / 1000, neurons: 1600 }];
+    assert.equal(repliesLeft(burst, evening, kyivOff), 0); // UTC day alone: 3000 spent → ~6 replies
+    assert.ok(repliesLeft(burst.slice(1), evening, kyivOff) > 0); // without the old burst the room is back
+    const old24 = [{ ts: evening / 1000 - 86400 - 60, neurons: 9000 }];
+    assert.equal(repliesLeft(old24, evening, kyivOff), repliesLeft([], evening, kyivOff)); // older than 24 h no longer counts
+    const mixed = [{ ts: Date.UTC(2026, 9, 4, 1) / 1000, neurons: 2500 }];
+    assert.equal(repliesLeft(mixed, evening, kyivOff), Math.min(repliesLeft(mixed, evening, kyivOff), repliesLeft([], evening, kyivOff))); // never above the empty count
   }
   { // 03.10.2026: "пафосу, ніби ти тут …" in two replies running
     const a = "Колю, пафосу, ніби ти тут філософ, а на деле - завтра у всьому дворі буде туман.", b = "Колю, тапок старий, зате свій.";

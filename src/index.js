@@ -747,13 +747,18 @@ const recordUsage = (env, r, input, output) => spend(env, r?.usage
   ? (r.usage.prompt_tokens * 9091 + r.usage.completion_tokens * 27273) / 1e6
   : (input * 9091 + output * 27273) / 3e6);
 const dailyLimit = (message) => /\b(?:4006|3036)\b|daily free allocation/i.test(message || "");
-const quotaKey = () => `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
-const quotaKnown = (env) => env.DB.prepare("SELECT 1 FROM ticks WHERE key = ?").bind(quotaKey()).first().then(Boolean);
+// 02.11.2026: the denial came while the panel's UTC day was low (24.10, 01.11) and matched a 24-hour rolling sum over 10k, so a flag
+// held till the UTC date changed blocked the 22:00 play for nothing. Now it holds QUOTA_HOLD seconds from the last denial; the
+// next AI call after that is the retry, and a new denial renews it. A denied call costs no neurons.
+const QUOTA_HOLD = 3600, QUOTA_KEY = "ai-limit";
+const quotaAt = (env) => env.DB.prepare("SELECT ts FROM ticks WHERE key = ?").bind(QUOTA_KEY).first("ts");
+const quotaHeld = (ts) => ts !== null && Date.now() / 1000 - ts < QUOTA_HOLD;
+const quotaKnown = (env) => quotaAt(env).then(quotaHeld);
 async function runAi(env, model, input) {
-  const key = quotaKey(), probe = env.quotaProbe;
+  const key = QUOTA_KEY, probe = env.quotaProbe;
   if (probe) env.quotaProbe = false;
-  const deniedAt = await env.DB.prepare("SELECT ts FROM ticks WHERE key = ?").bind(key).first("ts");
-  if (deniedAt !== null && !probe) throw new Error("4006: daily free allocation exhausted");
+  const deniedAt = await quotaAt(env);
+  if (quotaHeld(deniedAt) && !probe) throw new Error("4006: daily free allocation exhausted");
   if (Date.now() >= (env.replyUntil ?? Infinity)) throw new Error("AI: дедлайн минув");
   try {
     const result = await env.AI.run(model, input);
@@ -762,7 +767,7 @@ async function runAi(env, model, input) {
   }
   catch (e) {
     // The provider's explicit quota denial overrides our incomplete local spending estimate.
-    if (dailyLimit(e.message)) await env.DB.prepare("INSERT INTO ticks (key, ts) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET ts = MAX(ticks.ts + 1, excluded.ts)").bind(quotaKey(), Math.floor(Date.now() / 1000)).run();
+    if (dailyLimit(e.message)) await env.DB.prepare("INSERT INTO ticks (key, ts) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET ts = MAX(ticks.ts + 1, excluded.ts)").bind(key, Math.floor(Date.now() / 1000)).run();
     throw e;
   }
 }
