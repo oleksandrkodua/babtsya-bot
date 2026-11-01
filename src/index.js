@@ -293,6 +293,7 @@ async function digestRun(env, day, kind, keep, chat, renew) {
   const { results: rows } = await env.DB.prepare("SELECT message_id, ts, name, tag, text FROM messages WHERE processed = 0 AND ts < ? ORDER BY ts, message_id").bind(runStart).all();
   if (!rows.length) return `${kind}: нема повідомлень`;
   if (!keep && (kind === "midday" || kind === "evening") && rows.length < (kind === "midday" ? MIDDAY_MIN : EVENING_MIN)) return `${kind}: недостатньо повідомлень`;
+  if (!keep && (kind === "midday" || kind === "evening")) env = { ...env, quotaProbe: true };
 
   // ponytail: one offset for the whole run — messages across a DST switch night show ±1h.
   const offset = kyivOffsetSec(new Date());
@@ -749,12 +750,19 @@ const dailyLimit = (message) => /\b(?:4006|3036)\b|daily free allocation/i.test(
 const quotaKey = () => `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
 const quotaKnown = (env) => env.DB.prepare("SELECT 1 FROM ticks WHERE key = ?").bind(quotaKey()).first().then(Boolean);
 async function runAi(env, model, input) {
-  if (await quotaKnown(env)) throw new Error("4006: daily free allocation exhausted");
+  const key = quotaKey(), probe = env.quotaProbe;
+  if (probe) env.quotaProbe = false;
+  const deniedAt = await env.DB.prepare("SELECT ts FROM ticks WHERE key = ?").bind(key).first("ts");
+  if (deniedAt !== null && !probe) throw new Error("4006: daily free allocation exhausted");
   if (Date.now() >= (env.replyUntil ?? Infinity)) throw new Error("AI: дедлайн минув");
-  try { return await env.AI.run(model, input); }
+  try {
+    const result = await env.AI.run(model, input);
+    if (deniedAt !== null) await env.DB.prepare("DELETE FROM ticks WHERE key = ? AND ts = ?").bind(key, deniedAt).run();
+    return result;
+  }
   catch (e) {
     // The provider's explicit quota denial overrides our incomplete local spending estimate.
-    if (dailyLimit(e.message)) await env.DB.prepare("INSERT OR IGNORE INTO ticks (key, ts) VALUES (?, ?)").bind(quotaKey(), Math.floor(Date.now() / 1000)).run();
+    if (dailyLimit(e.message)) await env.DB.prepare("INSERT INTO ticks (key, ts) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET ts = MAX(ticks.ts + 1, excluded.ts)").bind(quotaKey(), Math.floor(Date.now() / 1000)).run();
     throw e;
   }
 }

@@ -555,6 +555,63 @@ test('confirmed daily quota overrides estimates across requests and expires at U
   assert.equal(await worker.ai(env, 'system', 'question', 0.2), 'Знову працюємо.');
 });
 
+test('scheduled digest probes a recorded quota once and clears it only on success', async () => {
+  for (const available of [false, true]) {
+    const { db, env, sent } = fixture(); seed(db);
+    const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+    db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
+    const run = env.AI.run; let calls = 0;
+    env.AI.run = async (...args) => { calls++; if (!available) throw Error('4006: daily free allocation'); return run(...args); };
+    await worker.digest(env, '2026-11-01', 'evening');
+    assert.equal(db.sql.prepare('SELECT count(*) n FROM ticks WHERE key=?').get(key).n, available ? 0 : 1);
+    assert.equal(db.sql.prepare('SELECT count(*) n FROM messages WHERE processed=0').get().n, available ? 0 : 60);
+    assert.equal(plays(sent).length, available ? 1 : 0);
+    if (!available) assert.equal(calls, 1);
+  }
+});
+
+test('a successful quota probe cannot erase a newer denial', async () => {
+  const { db, env } = fixture(); seed(db);
+  const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+  db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
+  const run = env.AI.run; let first = true;
+  env.AI.run = async (...args) => {
+    if (first) { first = false; db.sql.prepare('UPDATE ticks SET ts=ts+1 WHERE key=?').run(key); }
+    return run(...args);
+  };
+  await worker.digest(env, '2026-11-01', 'evening');
+  assert.equal(first, false);
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM ticks WHERE key=?').get(key).n, 1);
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM messages WHERE processed=0').get().n, 60);
+});
+
+test('ordinary replies stay blocked during a scheduled quota probe', async () => {
+  const { db, env, sent } = fixture(); seed(db);
+  const key = `ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`;
+  db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(key, now());
+  let release, started; const gate = new Promise((ok) => { release = ok; });
+  const entered = new Promise((ok) => { started = ok; });
+  const run = env.AI.run; let calls = 0;
+  env.AI.run = async (...args) => { calls++; if (calls === 1) { started(); await gate; } return run(...args); };
+  const digest = worker.digest(env, '2026-11-01', 'evening');
+  try {
+    await entered;
+    await worker.answer(env, { chat: { id: env.GROUP_CHAT_ID }, message_id: 99 }, 'TesterA', '@babtsya_z_altanky_bot привіт', '');
+    assert.equal(calls, 1);
+    assert.match(sent.find((s) => s.method === 'sendMessage').body.text, /\(0\)$/);
+  } finally { release(); await digest; }
+});
+
+test('manual and keep-preview digests do not bypass an existing quota denial', async () => {
+  const { db, env } = fixture(); seed(db);
+  db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run(`ai-limit|${new Date(Date.now()).toISOString().slice(0, 10)}`, now());
+  let calls = 0; env.AI.run = async () => { calls++; return completion(plan); };
+  await worker.digest(env, '2026-11-01', 'manual');
+  await worker.digest(env, '2026-11-01', 'evening', true);
+  assert.equal(calls, 0);
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM messages WHERE processed=0').get().n, 60);
+});
+
 test('temporary capacity errors retry without marking the daily quota exhausted', async () => {
   const { env } = fixture(); let calls = 0;
   env.AI.run = async () => { if (++calls === 1) throw Error('3040: Capacity temporarily exceeded'); return completion('Відповідь.'); };
