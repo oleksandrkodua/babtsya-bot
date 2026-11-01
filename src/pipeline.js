@@ -38,7 +38,7 @@ const STATIC_FIXES = { воїтелька: "войовниця", голубам�
 // so a remark "(Бабця, як завжди, мовчить)" keeps the nominative.
 const VOCATIVE = /(^|: |— )Бабця(?=, )/gm;
 
-const redact = (t) => REDACTIONS.reduce((s, [re, ph]) => s.replace(re, ph), t);
+export const redact = (t) => REDACTIONS.reduce((s, [re, ph]) => s.replace(re, ph), t);
 // "@nick" in the digest would ping that person; the bare nick keeps the meaning without a notification.
 const MENTION = /(^|[^\w.@])@([A-Za-z][\w]{3,31})/g;
 const unmention = (t) => t.replace(MENTION, "$1$2");
@@ -60,7 +60,7 @@ export function messageText(msg) {
     const title = (o.chat?.title || o.sender_chat?.title || "невідомо").replace(EMOJI, "").split(" | ")[0].trim().slice(0, 40);
     return o.type === "user" || o.type === "hidden_user" ? "[переслав чуже повідомлення]" : `[переслав допис з ${o.type === "chat" ? "групи" : "каналу"} «${title}»]`;
   }
-  return unmention(redact(text.slice(0, 800)).replace(BOT_HANDLE, BOT_NAME)); // ponytail: 800-char cap per message keeps a pasted article from eating the day
+  return unmention(redact(text).slice(0, 800).replace(BOT_HANDLE, BOT_NAME)); // ponytail: 800-char cap per message keeps a pasted article from eating the day
 }
 
 export const lengthTarget = (n) => (n <= 20 ? [500, 800] : n <= 150 ? [900, 1400] : [1400, 2000]); // a third shorter (25.09.2026)
@@ -135,7 +135,8 @@ export async function claim(db, key, now = Date.now()) {
   const ts = Math.floor(now / 1000);
   try {
     const r = await db.prepare("INSERT OR IGNORE INTO ticks (key, ts) VALUES (?, ?)").bind(key, ts).run();
-    await db.prepare("DELETE FROM ticks WHERE ts < ?").bind(ts - 3 * 86400).run();
+    try { await db.prepare("DELETE FROM ticks WHERE ts < ?").bind(ts - 3 * 86400).run(); }
+    catch (e) { console.log("ticks cleanup:", e.message); }
     return r.meta.changes > 0;
   } catch (e) {
     console.log("claim:", e.message);
@@ -152,7 +153,8 @@ export function due(day, m) {
   if (m === 120) out.push("закрити вчорашнє опитування");
   if (m === 210 && new Date(`${day}T12:00:00Z`).getUTCDay() === 1) out.push("хроніка тижня");
   if (m >= 180 && m <= 240) out.push("запас м'яса"); // 03:00–04:00 (23.10.2026): after the 00:00 UTC neuron reset, the day's budget is fresh
-  if (m === MIDDAY_MINUTE) out.push("денна п'єса");
+  // 13:00 and one retry at 13:30 (24.10.2026): the 13:00 tick claimed its slot and died silently, and midday had no second chance.
+  if (m === MIDDAY_MINUTE || m === MIDDAY_MINUTE + 30) out.push("денна п'єса");
   if (hour >= 22 && !o) out.push("закрити опитування");
   if (m >= (o?.evening ?? 22 * 60)) out.push("вечірня п'єса");
   if (GRUMBLE_SLOTS.includes(m) || m === grumbleMinute(day)) out.push("бурчання");
@@ -580,7 +582,9 @@ const WAR_FALLBACK = [
 // 11.10.2026 (user's newlogic.md): "абсурд", "парадокс" and the opener "Ім'я, твоє X - це …" (both 10.10 screenshots start so) are tics too.
 // 10.10.2026: "це така велична й безглузда метафізика, як намагання …" (2 of 2 screenshots): "як намагання", the "така X і Y" pair and the word "метафізика" are tics too.
 const TICS = [/(?<![\p{L}])пафос/iu, /ніби ти тут/iu, /на деле(?![\p{L}])/iu, /завтра\s+(?:на|у|в)\s+(?:весь|всьому|усьому|цілому|цілий)\s+двор/iu,
-  /(?<![\p{L}])а отже(?![\p{L}])/iu, /(?<![\p{L}])намаг/iu, /(?<![\p{L}])така\s+(?:ж\s+)?[\p{L}]+\s+(?:і|й)\s+[\p{L}]+/iu, /метафізик/iu, /(?<![\p{L}])(?:абсурд|парадокс)/iu, /^[\p{L}'’-]+,\s+(?:твій|твоє|твоя|твої|твого|твою)\s[^,.!?]{0,60}?\s[-—–]\s/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu];
+  /(?<![\p{L}])а отже(?![\p{L}])/iu, /(?<![\p{L}])намаг/iu, /(?<![\p{L}])така\s+(?:ж\s+)?[\p{L}]+\s+(?:і|й)\s+[\p{L}]+/iu, /метафізик/iu, /(?<![\p{L}])(?:абсурд|парадокс)/iu, /^[\p{L}'’-]+,\s+(?:твій|твоє|твоя|твої|твого|твою)\s[^,.!?]{0,60}?\s[-—–]\s/iu, /(?<![\p{L}])шуму(?![\p{L}])/iu, /а толку/iu, /а на виході/iu, /,\s*де замість/iu, /мандахуй/iu,
+  // 01.11.2026: live replies repeated this frame across unrelated questions.
+  /то як (?:пробувати|шукати|обирати)/iu, /(?:велична|урочиста)\s+(?:й|і)\s+(?:марна|безнадійна)\s+справа/iu];
 export const ticky = (t) => TICS.some((re) => re.test(t)); // her own past replies with a tic are not shown back to her: they bred more of it
 const ticCount = (d, asked) => TICS.filter((re) => re.test(d) && !re.test(asked)).length;
 export const ticFree = (drafts, asked) => {
@@ -594,11 +598,19 @@ export const ticFree = (drafts, asked) => {
 // the next 00:00 UTC, and the small daily stuff pro rata for the rest of the day, must leave room.
 // Measured: a play with poster ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
 export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
-export function repliesLeft(rows, nowMs, offsetSec) {
+// No midday play today (24.10.2026, limits): the evening one takes two halves of the chat, so it gets a bigger reserve.
+export const MISSED_MIDDAY_NEURONS = 1200;
+export function repliesLeft(rows, nowMs, offsetSec, middayMissed = false, done = [], active = false) {
   const DAY = 864e5, start = Math.floor(nowMs / DAY) * DAY, end = start + DAY;
   const spent = rows.filter((r) => r.ts * 1000 >= start).reduce((s, r) => s + r.neurons, 0);
-  const plays = PLAY_HOURS.filter((h) => { const t = start + h * 36e5 - offsetSec * 1000; return t > nowMs && t < end; }).length;
-  return Math.max(0, Math.floor((NEURONS_DAY - spent - PLAY_NEURONS * plays - OTHER_NEURONS * (end - nowMs) / DAY) / REPLY_NEURONS));
+  const outstanding = PLAY_HOURS.filter((h) => {
+    const kind = h === 13 ? "midday" : "evening", t = start + h * 36e5 - offsetSec * 1000;
+    const deadline = t + (h === 13 ? 1 : 2) * 36e5;
+    return !done.includes(kind) && nowMs < deadline && t < end;
+  });
+  const plays = Math.max(outstanding.length, active ? 1 : 0);
+  const extra = middayMissed && (outstanding.includes(22) || active) ? MISSED_MIDDAY_NEURONS : 0;
+  return Math.max(0, Math.floor((NEURONS_DAY - spent - PLAY_NEURONS * plays - extra - OTHER_NEURONS * (end - nowMs) / DAY) / REPLY_NEURONS));
 }
 
 export const warFallback = (play, chat) =>
@@ -808,8 +820,6 @@ export function pointsAtOther(text, mentions, other, aliases = []) {
   return AIMED.test(t) || AIMED_AT.test(t);
 }
 
-// The picture committee: three single-number answers (appetizing, realistic, flawless), averaged to one decimal.
-// Garbage answers don't vote; no valid vote at all → null, and the picture isn't stocked.
 // Which meat theme the night picture draws (23.10.2026): not one of the last few. A stocked picture's file_id ends with
 // "-m<index>"; older rows have no suffix and exclude nothing. At most count - 1 themes are excluded, so a choice always remains.
 export function pickMeat(count, recentIds, rand = Math.random) {
@@ -819,6 +829,8 @@ export function pickMeat(count, recentIds, rand = Math.random) {
   return pool[Math.floor(rand() * pool.length)];
 }
 
+// The picture committee: three single-number answers (appetizing, realistic, flawless), averaged to one decimal.
+// Garbage answers don't vote; no valid vote at all → null, and the picture isn't stocked.
 export function committeeScore(answers) {
   const votes = answers.map((a) => Number(String(a).match(/\d+/)?.[0])).filter((n) => n >= 1 && n <= 10);
   return votes.length ? Math.round((votes.reduce((s, n) => s + n, 0) / votes.length) * 10) / 10 : null;
@@ -1441,10 +1453,11 @@ export function finalize(play) {
     // ponytail: last-resort cut at a paragraph break; fires only if the fit-to-length pass also failed.
     // 13.10.2026: the cut took the moral (the last paragraph) — the moral stays, the paragraphs before it go.
     const at = play.lastIndexOf("\nМораль"), tail = at > 0 ? play.slice(at + 1) : "", head = at > 0 ? play.slice(0, at) : play;
+    if (tail.length + 2 >= HARD_LIMIT) return ""; // unusable output: retain input for a later digest
     const room = HARD_LIMIT - (tail ? tail.length + 2 : 0), cut = head.lastIndexOf("\n\n", room);
     play = (cut > 0 ? head.slice(0, cut) : head.slice(0, room)).trimEnd() + (tail ? `\n\n${tail}` : "");
   }
-  return play;
+  return play.length <= HARD_LIMIT ? play : "";
 }
 
 if (import.meta.main) {
@@ -1457,6 +1470,8 @@ if (import.meta.main) {
   assert.equal(messageText({ photo: [{}] }), "[фото]");
   assert.equal(messageText({ video: {}, caption: "дивіться, ліфт 😂" }), "дивіться, ліфт");
   assert.equal(messageText({ text: "Дзвоніть 050-000-00-00" }), "Дзвоніть [номер телефону]");
+  assert.equal(redact("TesterA, бляха: 2026 рік, 1400 нейронів, рахунок 3:2."), "TesterA, бляха: 2026 рік, 1400 нейронів, рахунок 3:2.");
+  assert.ok(!messageText({ text: "а".repeat(795) + "050-000-00-00" }).includes("050-")); // redact before cutting a contact in half
   assert.equal(messageText({ text: "Ночью атака дронов на область", forward_origin: { chat: { title: "Новини" } } }), null);
   assert.equal(messageText({ text: "Завтра дощ", forward_origin: { type: "channel", chat: { title: "Погода" } } }), "[переслав допис з каналу «Погода»]");
   assert.equal(messageText({ text: "Хто загубив ключі?", forward_origin: { type: "user", sender_user: { first_name: "Іра" } } }), "[переслав чуже повідомлення]");
@@ -1741,6 +1756,8 @@ if (import.meta.main) {
   assert.deepEqual(due("2026-09-30", 1260), ["тиша"]);
   assert.deepEqual(due("2026-09-30", 1320), ["тиша"]);
   assert.ok(due("2026-09-30", 1350).includes("вечірня п'єса") && !due("2026-09-30", 1350).includes("закрити опитування"));
+  assert.ok(due("2026-10-24", 780).includes("денна п'єса") && due("2026-10-24", 810).includes("денна п'єса")); // 24.10.2026: one retry
+  assert.ok(!due("2026-10-24", 750).includes("денна п'єса") && !due("2026-10-24", 840).includes("денна п'єса"));
   assert.ok(due("2026-10-01", 1260).includes("опитування") && due("2026-10-01", 1320).includes("вечірня п'єса"));
   assert.ok(due("2026-10-01", 120).includes("закрити вчорашнє опитування"));
   assert.equal(oneOff("2026-09-30")?.evening, 1350);
@@ -1760,6 +1777,12 @@ if (import.meta.main) {
     const after = Date.UTC(2026, 9, 4, 12); // 15:00 Kyiv: midday is behind, only the evening one is ahead
     assert.equal(repliesLeft([], after, kyivOff), Math.floor((NEURONS_DAY - PLAY_NEURONS - OTHER_NEURONS * 12 / 24) / REPLY_NEURONS));
     assert.equal(repliesLeft([{ ts: now / 1000 - 60, neurons: 9999 }], now, kyivOff), 0);
+    // 24.10.2026: midday skipped → the evening play is bigger, the reserve grows; nothing changes when no play is ahead
+    assert.equal(repliesLeft([], after, kyivOff, true), Math.floor((NEURONS_DAY - PLAY_NEURONS - MISSED_MIDDAY_NEURONS - OTHER_NEURONS * 12 / 24) / REPLY_NEURONS));
+    assert.ok(repliesLeft([], after, kyivOff, true) < repliesLeft([], after, kyivOff));
+    assert.ok(repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff, true) < repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff)); // 23:00: retries still need the extra reserve
+    const late = Date.UTC(2026, 9, 4, 21); // 00:00 Kyiv: evening retries have expired
+    assert.equal(repliesLeft([], late, kyivOff, true), repliesLeft([], late, kyivOff));
   }
   { // 03.10.2026: "пафосу, ніби ти тут …" in two replies running
     const a = "Колю, пафосу, ніби ти тут філософ, а на деле - завтра у всьому дворі буде туман.", b = "Колю, тапок старий, зате свій.";

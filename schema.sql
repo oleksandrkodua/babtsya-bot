@@ -4,9 +4,18 @@ CREATE TABLE IF NOT EXISTS messages (
   ts INTEGER NOT NULL,
   name TEXT NOT NULL,
   tag TEXT,
-  text TEXT NOT NULL
+  text TEXT NOT NULL,
+  processed INTEGER NOT NULL DEFAULT 0 CHECK (processed IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS messages_ts ON messages (ts);
+CREATE INDEX IF NOT EXISTS messages_pending ON messages (processed, ts);
+
+-- One consuming digest at a time; an expired lease can be replaced after a crashed run.
+CREATE TABLE IF NOT EXISTS digest_lock (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  token TEXT NOT NULL,
+  expires INTEGER NOT NULL
+);
 
 -- One row per published digest: stops double posting and keeps the plan as context for the next one.
 CREATE TABLE IF NOT EXISTS digests (
@@ -17,13 +26,15 @@ CREATE TABLE IF NOT EXISTS digests (
   PRIMARY KEY (day, kind)
 );
 
--- One row per daily poll: sent at 21:00, closed at 22:00 before the evening play; counts feed the day and week verdicts.
+-- Keep every poll; the most-voted poll wins the day, first posted on ties.
 CREATE TABLE IF NOT EXISTS polls (
-  day TEXT PRIMARY KEY,
+  day TEXT NOT NULL,
   chat_id TEXT NOT NULL,
   message_id INTEGER NOT NULL,
   zrada INTEGER,
-  peremoga INTEGER
+  peremoga INTEGER,
+  close_error TEXT,
+  PRIMARY KEY (chat_id, message_id)
 );
 
 -- Stock of pictures made ahead and scored by the committee (meat for the Lida tease). data = the JPEG as base64,
