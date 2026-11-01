@@ -14,7 +14,7 @@ import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
 import blessingsText from "../prompts/blessings.txt";
 import {
-  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, canonName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, pickMeat, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText, redact,
+  claim, ticky, grumbleShape, openedLike, BIG_DAY, BOT_NAME, HARD_LIMIT, applyFixes, castFix, castClean, castShuffle, rollCall, beforeMoral, copiedLines, recentMemory, packChunks, capLines, parseNoteLine, sameName, canonName, tailFit, oneOff, due, MIDDAY_MINUTE, shortDash, excerpt, leaks, castBare, castDescribe, pickMeat, nightRoom, ticFree, repliesLeft, keepHead, ensureHead, aliasSpeakers, callName, misattributed, plainMoral, parseVote, playTitle, committeeScore, fixNames, pointsAtOther, parseAliases, nightLine, displayName, stageHead, dedupLoop, finalize, lengthTarget, messageText, redact,
   GRUMBLE_SLOTS, MIDDAY_QUIET, titled, selfPortrait, SELF_SCENE, isStockPaint, grumbleSection, parseGrumbles, addressesBot, tidy, mentionPrefix, REPLY_MOVES, cursesHint, lexHint, grumbleHint, verseTail, verseAnchorHint, rhymeTail, rhymeFirst, isDrawCmd, drawSubject, factsHint, cartoonize, namelessScene, isFlagged, NO_PAINT, REFUSE_PAINT, PAINT_CAPS, replyTail, parseCurses, contextLine, bodies, IMAGES, stripHints, femaleSet, isFemale, genderLine, topicFor, prevContext, teaseMinute, neighbourMinute, splitChunks, warFallback, warWords, withoutReposts, replyPlan, replyAsk, replyAddressee, addressLines, draftHint, finishReply, replyOut, replyTarget, drawAsk, paintTarget, pickFrom
 } from "./pipeline.js";
 import { OPTIONS, QUESTION, pollRemark } from "../poll.js";
@@ -983,6 +983,10 @@ async function committee(env, b64) {
 // One meat picture into the stock: drawn, scored, kept in D1 as base64 until the tease sends it. Nothing goes to
 // any chat (25.09.2026: "мені в особисті вже нічого не має слати").
 async function stockMeat(env) {
+  // 02.11.2026: not after a heavy evening — the last 24 h of spend (the limit's window, not the UTC day) must leave room for a play.
+  if (await quotaKnown(env)) return "stock: ліміт AI ще діє — пропуск";
+  const spent24 = (await env.DB.prepare("SELECT SUM(neurons) AS n FROM spend WHERE ts > ?").bind(Math.floor(Date.now() / 1000) - 86400).first("n").catch(() => 0)) ?? 0;
+  if (!nightRoom(spent24, MEAT_NEURONS)) return `stock: за 24 год витрачено ≈${Math.round(spent24)} — пропуск до наступної ночі`;
   const recent = (await env.DB.prepare("SELECT file_id FROM pics WHERE kind = 'meat' ORDER BY created DESC LIMIT 3").all().catch(() => ({ results: [] }))).results.map((r) => r.file_id);
   const theme = pickMeat(MEATS.length, recent);
   const b64 = await draw64(env, `${MEATS[theme]}, appetizing close-up food photo, rustic kitchen table, warm light.${NO_TEXT}`, "", 0, MEAT_MODEL, MEAT_NEURONS, false); // 23.10.2026: a schnell meat picture went into the stock; only the meat model's picture is kept

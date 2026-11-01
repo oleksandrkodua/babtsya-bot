@@ -600,6 +600,9 @@ export const ticFree = (drafts, asked) => {
 export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
 // No midday play today (24.10.2026, limits): the evening one takes two halves of the chat, so it gets a bigger reserve.
 export const MISSED_MIDDAY_NEURONS = 1200;
+// The night picture must not be what pushes the last 24 h over the line (01.11.2026: the 1.4k picture at 03:00 was part of the ≈9.9k
+// that ended in 4006 at ~14:00): it is drawn only if one play still fits after it.
+export const nightRoom = (spent24, cost) => spent24 + cost + PLAY_NEURONS <= NEURONS_DAY;
 export function repliesLeft(rows, nowMs, offsetSec, middayMissed = false, done = [], active = false) {
   const DAY = 864e5, start = Math.floor(nowMs / DAY) * DAY, end = start + DAY;
   const sum = (from) => rows.filter((r) => r.ts * 1000 >= from).reduce((s, r) => s + r.neurons, 0);
@@ -1785,6 +1788,8 @@ if (import.meta.main) {
     assert.ok(repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff, true) < repliesLeft([], Date.UTC(2026, 9, 4, 20), kyivOff)); // 23:00: retries still need the extra reserve
     const late = Date.UTC(2026, 9, 4, 21); // 00:00 Kyiv: evening retries have expired
     assert.equal(repliesLeft([], late, kyivOff, true), repliesLeft([], late, kyivOff));
+    assert.ok(nightRoom(0, 1400) && nightRoom(6800, 1400)); // 6800 + 1400 + 1800 = 10000: just fits
+    assert.ok(!nightRoom(6801, 1400) && !nightRoom(7761, 1400)); // 01.11.2026: 7761 over the previous 24 h → skip
     // 02.11.2026: smaller of the UTC day and the last 24 h (01.11: ≈4.2k "today", over 10k in 24 h → 4006)
     const evening = Date.UTC(2026, 9, 4, 11, 30); // 14:30 Kyiv
     const burst = [{ ts: Date.UTC(2026, 9, 3, 17) / 1000, neurons: 7000 }, { ts: Date.UTC(2026, 9, 4, 1) / 1000, neurons: 1400 }, { ts: Date.UTC(2026, 9, 4, 11) / 1000, neurons: 1600 }];

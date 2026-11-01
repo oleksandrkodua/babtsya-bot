@@ -10,7 +10,7 @@ let source = read("src/index.js").replace(/import (\w+) from "\.\.\/prompts\/([^
   (_, name, file) => `const ${name} = ${JSON.stringify(read(`prompts/${file}`))};`)
   .replace('"./pipeline.js"', JSON.stringify(new URL("src/pipeline.js", root).href))
   .replace('"../poll.js"', JSON.stringify(new URL("poll.js", root).href));
-source += "\nexport { ingest, digest, ai, look, klein, compose, answer, draw64, closePoll, poll, pollText, committee, chronicle, left, grumble };";
+source += "\nexport { ingest, digest, ai, look, klein, compose, answer, draw64, closePoll, poll, pollText, committee, chronicle, left, grumble, stockMeat };";
 const worker = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 
 class DB {
@@ -695,4 +695,24 @@ test('a quota failure during the first drawing request sends an offline reply wi
   assert.equal(calls, 1);
   const replies = sent.filter((s) => s.method === 'sendMessage');
   assert.equal(replies.length, 1); assert.match(replies[0].body.text, /\(0\)$/);
+});
+
+test('night meat picture is skipped after a heavy 24 hours or a held quota, and tried otherwise', async () => {
+  const spendAt = (db, neurons, ago) => db.sql.prepare('INSERT INTO spend(ts,neurons) VALUES(?,?)').run(now() - ago, neurons);
+  const attempt = async (prepare) => {
+    const { db, env } = fixture(); let calls = 0;
+    env.AI.run = async () => { calls++; throw Error('klein: synthetic failure'); };
+    prepare(db);
+    const result = await worker.stockMeat(env);
+    return { result, calls, pics: db.sql.prepare("SELECT count(*) n FROM pics WHERE kind='meat'").get().n };
+  };
+  const heavy = await attempt((db) => { spendAt(db, 4000, 20 * 3600); spendAt(db, 3800, 3600); }); // 7800 inside 24 h
+  assert.match(heavy.result, /пропуск до наступної ночі/);
+  assert.equal(heavy.calls, 0); assert.equal(heavy.pics, 0);
+  const old = await attempt((db) => spendAt(db, 9000, 25 * 3600)); // older than 24 h does not count
+  assert.ok(old.calls >= 1); assert.match(old.result, /не намалювала/);
+  const held = await attempt((db) => db.sql.prepare('INSERT INTO ticks(key,ts) VALUES(?,?)').run('ai-limit', now()));
+  assert.match(held.result, /ліміт AI ще діє/); assert.equal(held.calls, 0);
+  const light = await attempt((db) => spendAt(db, 2000, 3600));
+  assert.ok(light.calls >= 1);
 });
