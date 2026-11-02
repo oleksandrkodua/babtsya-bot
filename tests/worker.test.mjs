@@ -396,6 +396,15 @@ test('poll migration preserves references and counters and admits another poll o
   assert.deepEqual(legacy.sql.prepare('PRAGMA table_info(polls)').all(), new DB().sql.prepare('PRAGMA table_info(polls)').all());
 });
 
+test('counter reserves one upcoming play and includes both text and image spending over 24 hours',()=>{
+  const at=Date.parse('2026-11-02T09:55:00Z'),off=7200;
+  const spent=[{ts:at/1000-15*3600,neurons:3496.8},{ts:at/1000-3600,neurons:2380}];
+  assert.equal(pipeline.repliesLeft(spent,at,off),4); // 5876.8 spent, one play ahead, small daily reserve
+  assert.equal(pipeline.repliesLeft(spent,at,off,false,['midday']),4);
+  assert.equal(pipeline.repliesLeft(spent,at,off,false,['midday','evening']),9);
+  assert.equal(pipeline.repliesLeft(spent,at,off,false,['midday','evening'],true),4);
+});
+
 test('digest reserve lasts through retries, releases on completion, and the spend leaves the 24-hour window',()=>{
   const spent=[{ts:Date.parse('2026-11-01T17:00:00Z')/1000,neurons:7900}],off=7200;
   const before=Date.parse('2026-11-01T19:59:00Z'),during=Date.parse('2026-11-01T20:01:00Z');

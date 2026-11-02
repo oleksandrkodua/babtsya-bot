@@ -595,7 +595,7 @@ export const ticFree = (drafts, asked) => {
 // "(5)" after a tag reply (04.10.2026): how many more full replies the free neurons allow. On 21.10.2026 the panel said
 // "used today 3.67k/10k" while the last 24 h summed to 11.3k, so the count moved to the UTC day. Then 4006 came with a low panel
 // (24.10: 1.37k "today", ≈10.4k over 24 h; 01.11: ≈4.2k "today", the rolling sum crossed 10k at ~14:00 by `spend`), so the answer is
-// the smaller of two: the UTC day and the last 24 h. The plays still to come and the small daily stuff pro rata stay reserved either way.
+// the smaller of two: the UTC day and the last 24 h. Only the next play and the small daily stuff pro rata stay reserved (user, 02.11.2026).
 // Measured: a play with poster ≈ 2–2.5k (13.10.2026 from the spend table: midday ≈ 1.2k, evening ≈ 1.2–1.5k, so 1800 with a margin), a full reply ≈ 400 (30.09.2026). ponytail: OTHER_NEURONS is a guess — grumbles, Сусід, tease, night stock.
 export const NEURONS_DAY = 10000, PLAY_NEURONS = 1800, REPLY_NEURONS = 400, OTHER_NEURONS = 800, PLAY_HOURS = [13, 22];
 // No midday play today (24.10.2026, limits): the evening one takes two halves of the chat, so it gets a bigger reserve.
@@ -611,7 +611,7 @@ export function repliesLeft(rows, nowMs, offsetSec, middayMissed = false, done =
     const deadline = t + (h === 13 ? 1 : 2) * 36e5;
     return !done.includes(kind) && nowMs < deadline && t < end;
   });
-  const plays = Math.max(outstanding.length, active ? 1 : 0);
+  const plays = outstanding.length > 0 || active ? 1 : 0;
   const extra = middayMissed && (outstanding.includes(22) || active) ? MISSED_MIDDAY_NEURONS : 0;
   const reserve = PLAY_NEURONS * plays + extra + OTHER_NEURONS * (end - nowMs) / DAY;
   const room = (spent) => Math.max(0, Math.floor((NEURONS_DAY - spent - reserve) / REPLY_NEURONS));
@@ -1772,13 +1772,13 @@ if (import.meta.main) {
     ["[10:00] Lida: я знову купила ковбасу на всю пенсію"]), []);
   assert.equal(dropName("Тарасе, не сци.", "Тарас"), "Тарасе, не сци.");
   assert.equal(dropName("Тарас, не сци.", "Тарас"), "Не сци.");
-  { // 21.10.2026: replies left in the UTC day (resets 03:00 Kyiv), minus the plays still to come today
+  { // Replies left across both spending windows, minus one upcoming play (02.11.2026).
     const now = Date.UTC(2026, 9, 4, 9), kyivOff = 3 * 3600; // 12:00 Kyiv: midday at 13:00 and evening at 22:00 both ahead
-    assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 14
+    assert.equal(repliesLeft([], now, kyivOff), Math.floor((NEURONS_DAY - PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 19
     const yesterday = Date.UTC(2026, 9, 3, 20) / 1000; // 23:00 Kyiv yesterday: already another day for the counter
-    assert.equal(repliesLeft([{ ts: yesterday, neurons: 9000 }], now, kyivOff), 0); // 02.11.2026: yesterday's 9000 is inside the last 24 h, the UTC-day count alone said 14
+    assert.equal(repliesLeft([{ ts: yesterday, neurons: 9000 }], now, kyivOff), 0); // Yesterday's 9000 is inside the last 24 h; the UTC-day count alone says 19.
     const today = Date.UTC(2026, 9, 4, 1) / 1000;
-    assert.equal(repliesLeft([{ ts: today, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - 2 * PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 8
+    assert.equal(repliesLeft([{ ts: today, neurons: 2500 }], now, kyivOff), Math.floor((NEURONS_DAY - 2500 - PLAY_NEURONS - OTHER_NEURONS * 15 / 24) / REPLY_NEURONS)); // 13
     const after = Date.UTC(2026, 9, 4, 12); // 15:00 Kyiv: midday is behind, only the evening one is ahead
     assert.equal(repliesLeft([], after, kyivOff), Math.floor((NEURONS_DAY - PLAY_NEURONS - OTHER_NEURONS * 12 / 24) / REPLY_NEURONS));
     assert.equal(repliesLeft([{ ts: now / 1000 - 60, neurons: 9999 }], now, kyivOff), 0);

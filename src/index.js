@@ -33,7 +33,7 @@ const AGREE_PASS = "\n\nЦе другий прохід: перший корек�
 // A tag reply (25.09.2026, "more neurons for funnier, on-topic answers"): a brief of the conversation → 3 drafts →
 // a judge scores them → a weak best (< REPLY_GOOD) gets one more round with the judge's pick as the bar → corrector.
 const REPLY_DRAFTS = 3;
-// Neuron budget: when the "(N)" meter says 0 (no full reply left before the plays), she answers with one draft, no judge,
+// Neuron budget: when the "(N)" meter says 0 (no full reply left before the next play), she answers with one draft, no judge,
 // no second round (~45 neurons) — the meter replaced a fixed 15 a day (user, 04.10.2026).
 const REPLY_GOOD = 7; // judge score 1–10
 // waitUntil lives ~30 s after the webhook answer (25.09.2026: two tags got no reply, the chain runs 10–20 s):
@@ -535,7 +535,7 @@ async function answerRun(env, msg, name, raw, botText, other = null, news = "", 
   const exhausted = !said && await quotaKnown(env);
   const text = exhausted ? QUOTA_REPLY : replyOut(said, leaked, NAP[Math.floor(Math.random() * NAP.length)]);
   const replyTo = replyTarget({ to, name, other, messageId: msg.message_id });
-  // "(5)": full replies the neurons still allow, plays kept (user, 04.10.2026); not remembered with the line.
+  // "(5)": full replies the neurons still allow, next play kept (user, 02.11.2026); not remembered with the line.
   const count = await left(env).then((k) => ` (${k})`, () => "");
   await telegram(env, "sendMessage", { chat_id: msg.chat.id, text: text + count, reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } })
     .then(() => remember(env, text))
