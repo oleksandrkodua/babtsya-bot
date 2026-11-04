@@ -9,6 +9,7 @@ const read = (file) => readFileSync(new URL(file, root), "utf8");
 let source = read("src/index.js").replace(/import (\w+) from "\.\.\/prompts\/([^"\n]+)";/g,
   (_, name, file) => `const ${name} = ${JSON.stringify(read(`prompts/${file}`))};`)
   .replace('"./pipeline.js"', JSON.stringify(new URL("src/pipeline.js", root).href))
+  .replace('"./remind.js"', JSON.stringify(new URL("src/remind.js", root).href))
   .replace('"../poll.js"', JSON.stringify(new URL("poll.js", root).href));
 source += "\nexport { ingest, digest, ai, look, klein, compose, answer, draw64, closePoll, poll, pollText, committee, chronicle, left, grumble, stockMeat };";
 const worker = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);

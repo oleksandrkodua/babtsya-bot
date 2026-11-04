@@ -9,6 +9,7 @@ import verseJudge from "../prompts/verse-judge.txt";
 import cursesText from "../prompts/curses.txt";
 import lexiconText from "../prompts/lexicon.txt";
 import politicsText from "../prompts/politics.txt";
+import { isRemind, parseRemind, matchName, remindAck, remindText, REMIND_ASK, REMIND_MANY } from "./remind.js";
 import cultureText from "../prompts/culture.txt";
 import openersText from "../prompts/openers.txt";
 import closersText from "../prompts/closers.txt";
@@ -163,6 +164,7 @@ export default {
     const now = new Date(controller.scheduledTime); // cron runs at :00 and :30
     const { day } = kyiv(now), m = slotMinute(now), d = new Set(due(day, m)); // the schedule itself is due() in pipeline.js
     if (d.has("тиша")) return console.log("тиша (ONE_OFF)");
+    await deliverReminders(env, now).catch((e) => console.log("нагадування:", e.message));
     // Untold only: the last 20 told ones stay for reply context and must not count toward a play (29.09.2026).
     const pending = () => env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE processed = 0 AND ts < ?").bind(Math.floor(now / 1000)).first("n");
     const done = (kind) => env.DB.prepare("SELECT 1 FROM digests WHERE day = ? AND kind = ?").bind(day, kind).first();
@@ -512,6 +514,7 @@ async function answer(env, msg, name, raw, botText, other = null, news = "", pho
 }
 
 async function answerRun(env, msg, name, raw, botText, other = null, news = "", photo = "") {
+  if (isRemind(raw)) return remind(env, msg, name, redact(raw), other);
   if (await quotaKnown(env)) return telegram(env, "sendMessage", { chat_id: msg.chat.id, text: `${QUOTA_REPLY} (0)`, reply_parameters: { message_id: paintTarget(raw, other, msg.message_id), allow_sending_without_reply: true } });
   const ask = drawAsk(raw, other); // "" unless a picture is asked: by the tag itself or by a bare tag under someone's "намалюй …"
   // The last 20 messages, so she answers the conversation and not just the one line (25.09.2026).
@@ -540,6 +543,43 @@ async function answerRun(env, msg, name, raw, botText, other = null, news = "", 
   await telegram(env, "sendMessage", { chat_id: msg.chat.id, text: text + count, reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } })
     .then(() => remember(env, text))
     .then(() => console.log(`Відповідь ${to || name} (${tone}${lean ? ", економ" : ""}): ${text}`), (e) => console.log("Відповідь:", e.message));
+}
+
+// "@бабця нагадай Василю зварити капусняк післязавтра": a stock answer, no model, no neurons (04.11.2026).
+async function remind(env, msg, name, raw, other) {
+  const reply = (text) => telegram(env, "sendMessage", { chat_id: msg.chat.id, text, reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true } });
+  const { results } = await env.DB.prepare("SELECT name FROM people").all().catch(() => ({ results: [] }));
+  const offsetSec = kyivOffsetSec(new Date()), rem = parseRemind(raw, { nowMs: Date.now(), offsetSec, author: name, other, names: results.map((r) => r.name) });
+  if (rem.ask) return reply(REMIND_ASK[rem.ask]);
+  if ((await env.DB.prepare("SELECT COUNT(*) AS n FROM reminders WHERE sent = 0 AND author = ?").bind(name).first("n")) >= 10) return reply(REMIND_MANY);
+  const target = rem.all ? "*" : rem.target;
+  await env.DB.prepare("INSERT INTO reminders (due, target, what, author, message_id, created) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(Math.floor(rem.dueMs / 1000), target, rem.what, name, msg.message_id, Math.floor(Date.now() / 1000)).run();
+  console.log(`Нагадування від ${name} для ${target}: ${rem.what}`);
+  return reply(remindAck(rem, offsetSec));
+}
+
+// Every cron tick (:00/:30): due ones go out once; a failed send is retried next tick for two days.
+const lowerFirst = (text, prefix) => prefix ? text[0].toLowerCase() + text.slice(1) : text; // "Ivan M, нагадую…", not "Ivan M, Нагадую…"
+async function deliverReminders(env, now) {
+  const sec = Math.floor(now / 1000);
+  const { results } = await env.DB.prepare("SELECT id, target, what, author, message_id FROM reminders WHERE sent = 0 AND due <= ? AND due > ? ORDER BY due LIMIT 5").bind(sec, sec - 172800).all();
+  if (!results.length) return;
+  const { results: people } = await env.DB.prepare("SELECT name, uid FROM people").all();
+  for (const r of results) {
+    const claimed = await env.DB.prepare("UPDATE reminders SET sent = 1 WHERE id = ? AND sent = 0").bind(r.id).run();
+    if (!claimed.meta.changes) continue;
+    try {
+      const own = r.target === r.author, name = r.target === "*" || r.target.startsWith("@") ? null : people.find((p) => p.name === matchName(r.target, people.map((x) => x.name)));
+      const prefix = name ? mentionPrefix([name]) : { text: r.target === "*" ? "" : r.target.startsWith("@") ? `${r.target}, ` : `${r.target}, `, entities: [] };
+      await telegram(env, "sendMessage", { chat_id: target(env), text: prefix.text + lowerFirst(remindText(r.what, own ? "" : r.author), prefix.text), entities: prefix.entities,
+        ...(r.message_id && { reply_parameters: { message_id: r.message_id, allow_sending_without_reply: true } }) });
+      console.log(`Нагадування ${r.id} для ${r.target}: ${r.what}`);
+    } catch (e) {
+      await env.DB.prepare("UPDATE reminders SET sent = 0 WHERE id = ?").bind(r.id).run();
+      console.log(`Нагадування ${r.id}: ${e.message}`);
+    }
+  }
 }
 
 async function poll(env, toGroup = false) {

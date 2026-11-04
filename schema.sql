@@ -90,3 +90,16 @@ CREATE TABLE IF NOT EXISTS ticks (
   key TEXT PRIMARY KEY,
   ts INTEGER NOT NULL
 );
+
+-- "@бабця нагадай …" (04.11.2026): posted by the cron tick when due. See migrations/0003-reminders.sql.
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  due INTEGER NOT NULL,
+  target TEXT NOT NULL,
+  what TEXT NOT NULL,
+  author TEXT NOT NULL,
+  message_id INTEGER,
+  created INTEGER NOT NULL,
+  sent INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS reminders_due ON reminders (sent, due);
