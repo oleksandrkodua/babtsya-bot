@@ -792,6 +792,14 @@ export function aliasSpeakers(text, aliases, senders) {
 export function fixNames(text, names) {
   const all = [...new Set(names)];
   const known = new Set(all.flatMap((n) => n.split(/\s+/)));
+  // When both words were transliterated, restore the surname first so the existing first-name repair can match.
+  text = text.replace(/(?<![\p{L}])\p{Lu}[\p{L}'’-]+(?![\p{L}])/gu, (word, at, source) => {
+    const first = source.slice(0, at).match(/(\p{Lu}[\p{L}'’-]+)[ \t]+$/u)?.[1];
+    if (!first || all.includes(`${first} ${word}`)) return word;
+    const matches = all.map((n) => n.split(/\s+/)).filter((w) => w.length === 2
+      && otherScript(first, w[0]) && otherScript(word, w[1]) && sameName(first, w[0]) && sameName(word, w[1]));
+    return matches.length === 1 ? matches[0][1] : word;
+  });
   for (const full of all) {
     const words = full.split(/\s+/).filter((w) => /\p{L}/u.test(w));
     if (words.length >= 2) {
@@ -907,7 +915,7 @@ export function misattributed(play, chat, n = 5) {
 // Every label the model sees in its input and could echo back: block headers, plan fields, template slots,
 // chat markers, reply hints. Whole lines for headers and fields, the marker itself for inline ones.
 const SERVICE_LINE = new RegExp(
-  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ТВОЇ ОСТАННІ РЕПЛІКИ|РОЗМОВА ПЕРЕД ЦИМ|ЩО БУЛО В ДВОРІ[^\\n]*|ХРОНІКА ДВОРУ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
+  "^\\s*(?:(?:ОБРАЗ ДНЯ|ОБСЯГ|НІЧ|ПЛАН ДНЯ|ЖАНР ВИПУСКУ|ГОЛОВНА ІСТОРІЯ ЖАНРУ|ЧАТ|СТАТЬ|ПІДПИСИ УЧАСНИКІВ|ТЕМИ|ЩО РОБИВ|КОНТЕКСТ ПОПЕРЕДНЬОГО ВИПУСКУ|ТВОЇ ОСТАННІ РЕПЛІКИ|РОЗМОВА ПЕРЕД ЦИМ|ЩО БУЛО В ДВОРІ[^\\n]*|ХРОНІКА ДВОРУ|РОЗБІР|ХТО Є ХТО|ЧАСТИНА \\d+ з \\d+)(?![\\p{L}]).*" +
   "|(?:Учасники|Тип|Температура|Хронологія|Чим закінчилось|Найкращі фрази|Найкраща фраза)\\s*:.*" +
   "|\\[\\d\\d:\\d\\d\\].*" + // a copied chat line
   "|не надано — день великий.*)$\\n?",
@@ -1696,6 +1704,7 @@ if (import.meta.main) {
   assert.ok(nightLine([...nightChat.slice(1), "[09:00] Lida: б"]).endsWith("Без сцени — одна ремарка."));
   assert.equal(nightLine(["[13:00] Lida: а", "[22:05] Nina: б"]), "");
   assert.equal(tidy("НІЧ: 3 повідомлень\nСцена"), "Сцена");
+  assert.equal(tidy("ЖАНР ВИПУСКУ: суд\nГОЛОВНА ІСТОРІЯ ЖАНРУ: Парковка\nСцена"), "Сцена");
   const castTags = new Map([["Lida", "ковбаска"], ["Taras", "Ненажера"]]);
   assert.equal(castClean("Дійові особи:\nLida — ковбаска, яка знає ціну репутації;\nTaras — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена", castTags),
     "Дійові особи:\nLida «ковбаска»\nTaras «Ненажера» — шукач корпусу для сервера;\nIvan M — латає дірки\n\nСцена");
@@ -2101,6 +2110,15 @@ if (import.meta.main) {
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], zina, two.get(zina.name)), true);
   assert.equal(pointsAtOther("@babtsya_z_altanky_bot скажи Олі щось", [], taras, two.get(taras.name)), false);
   const crew = ["Nina Petrenko", "Taras", "Bohdan", "Олександр", "Ivan M", "Pablo Ruiz Diaz"];
+  { // 04.11.2026: a fully translated first name and surname escaped repair in a stage remark.
+    const names = ["Zina Hrytsenko", "Nora Frog"];
+    assert.equal(fixNames("(Зіна Гріценко з’являється з печивом.)", names), "(Zina Hrytsenko з’являється з печивом.)");
+    assert.equal(fixNames("(Сьогодні Зіна Гріценко принесла печиво.)", names), "(Сьогодні Zina Hrytsenko принесла печиво.)");
+    assert.equal(fixNames("Зіна Гріценко: Чай!\nЗіна Гріценко — приносить печиво", names), "Zina Hrytsenko: Чай!\nZina Hrytsenko — приносить печиво");
+    assert.equal(fixNames("Зіна: Чай! Зіна Ковальчук мовчить.", names), "Зіна: Чай! Зіна Ковальчук мовчить.");
+    assert.equal(fixNames("Зіна Гріценко мовчить.", [...names, "Зіна Гріценко"]), "Зіна Гріценко мовчить.");
+    assert.equal(fixNames("Зіна Гріценко мовчить.", [...names, "Zina Hritsenko"]), "Зіна Гріценко мовчить.");
+  }
   assert.equal(fixNames("(Ніркослав Petrenko показав фото.)", ["Николай Petrenko"]), "(Николай Petrenko показав фото.)");
   assert.equal(fixNames("(Ніркослав Коваль показав фото тварини.)", ["Николай Коваль"]), "(Николай Коваль показав фото тварини.)");
   assert.equal(fixNames("Nikolay Коваль: А Руслан? Він же лазить.", ["Николай Коваль"]), "Николай Коваль: А Руслан? Він же лазить."); // 14.10.2026

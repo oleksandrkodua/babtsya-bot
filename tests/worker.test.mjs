@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test, afterEach } from "node:test";
+import { storedGenre, genrePlan, parseGenre } from "../src/genres.js";
 
 // Load the real Worker with text imports in Node; every external call below is a mock.
 const root = new URL("../", import.meta.url);
@@ -10,6 +11,8 @@ let source = read("src/index.js").replace(/import (\w+) from "\.\.\/prompts\/([^
   (_, name, file) => `const ${name} = ${JSON.stringify(read(`prompts/${file}`))};`)
   .replace('"./pipeline.js"', JSON.stringify(new URL("src/pipeline.js", root).href))
   .replace('"./remind.js"', JSON.stringify(new URL("src/remind.js", root).href))
+  .replace('"./genres.js"', JSON.stringify(new URL("src/genres.js", root).href))
+  .replace('"./scenes.js"', JSON.stringify(new URL("src/scenes.js", root).href))
   .replace('"../poll.js"', JSON.stringify(new URL("poll.js", root).href));
 source += "\nexport { ingest, digest, ai, look, klein, compose, answer, draw64, closePoll, poll, pollText, committee, chronicle, left, grumble, stockMeat };";
 const worker = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
@@ -48,7 +51,7 @@ class DB {
 
 const completion = (text) => ({ response: text, usage: { prompt_tokens: 10, completion_tokens: 10 } });
 const plan = "ТЕМИ\n1. Ремонт лавки\nУчасники: TesterA, TesterB\nХронологія: пофарбували лавку";
-const play = "«Лавка»\n\nДійові особи:\nTesterA — фарбує лавку\nTesterB — приносить фарбу\n\n(Сцена 1. Двір.)\nTesterA: Лавку пофарбуємо до обіду.\nTesterB: А потім будемо пити чай.\n\nМораль: Фарба сохне, а чай стигне.";
+const play = "«Лавка»\n\nДійові особи:\nTesterA — фарбує лавку\nTesterB — приносить фарбу\n\n(Сцена 1. Двір.)\nTesterA: Лавку пофарбуємо до обіду.\nTesterB: А потім будемо пити чай.\nTesterA: Фарбою не переплутай.\n\nМораль: Фарба сохне, а чай стигне.";
 const now = () => Math.floor(Date.now() / 1000);
 const originalFetch = globalThis.fetch, originalNow = Date.now;
 globalThis.fetch = async () => { throw new Error("Network is disabled in Worker tests"); };
@@ -83,6 +86,168 @@ function seed(db, count = 60) {
   for (let id = 1; id <= count; id++) insert.run(id, now() - 100 + id, id % 2 ? "TesterA" : "TesterB", `Ремонт лавки, запис ${id}.`);
 }
 const plays = (sent) => sent.filter((r) => r.method === "sendMessage" && r.body.text.includes("Фарба сохне"));
+
+function chooseGenre(env, choice, inputPlan = plan, seen = []) {
+  const run = env.AI.run;
+  env.AI.run = async (model, args) => {
+    const system = args.messages?.[0]?.content || "";
+    if (system.startsWith("Ти — уважний секретар")) return completion(inputPlan);
+    if (system.startsWith("Ти — редактор жанру")) {
+      seen.push(args.messages[1].content);
+      return completion(typeof choice === "string" ? choice : JSON.stringify(choice));
+    }
+    return run(model, args);
+  };
+}
+const writerInput = (calls) => calls.filter((c) => c.messages?.[0]?.content.startsWith("Ти — Бабця з альтанки, бот")).at(-1)?.messages[1].content;
+
+test("one scene-editing pass precedes the corrector and sends the edited play to the group once", async () => {
+  const { db, env, sent, calls } = fixture(); seed(db);
+  const run = env.AI.run;
+  let edits = 0;
+  env.AI.run = async (model, args) => {
+    if (args.messages?.[0]?.content.startsWith("Ти — редактор сцен")) {
+      edits++;
+      assert.ok(args.messages[1].content.includes("ПЛАН ДНЯ:"));
+      assert.ok(args.messages[1].content.includes("ЧАТ:"));
+      return completion(JSON.stringify({ edits: [{ scene: 1, text: "TesterA: Лавку пофарбуємо до обіду.\nTesterB: А чай у нас теж кольоровий?\nTesterA: Тільки не з цього відра." }] }));
+    }
+    return run(model, args);
+  };
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.equal(edits, 1);
+  const posts = plays(sent);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body.chat_id, env.GROUP_CHAT_ID);
+  assert.ok(posts[0].body.text.includes("Тільки не з цього відра."));
+  assert.ok(!posts[0].body.text.includes("Фарбою не переплутай."));
+  assert.ok(calls.some((c) => c.messages[1].content.includes("Тільки не з цього відра.")));
+});
+
+test("a failed scene editor preserves input facts and a short scene becomes a remark", async () => {
+  const { db, env, sent } = fixture(); seed(db);
+  const run = env.AI.run;
+  env.AI.run = async (model, args) => {
+    const system = args.messages?.[0]?.content || "";
+    if (system.startsWith("Ти — редактор сцен")) return completion("not JSON");
+    if (system.startsWith("Ти — Бабця з альтанки, бот")) return completion(play.replace("TesterA: Фарбою не переплутай.\n", ""));
+    return run(model, args);
+  };
+  await worker.digest(env, "2026-11-04", "manual");
+  const text = plays(sent)[0].body.text;
+  assert.doesNotMatch(text, /\(Сцена/);
+  assert.ok(text.includes("Лавку пофарбуємо до обіду."));
+  assert.ok(text.includes("А потім будемо пити чай."));
+  assert.ok(text.length <= 3900);
+});
+
+test("genre choice accepts only known genres with an exact topic from the plan", () => {
+  for (const genre of ["court", "detective", "fairy"]) {
+    assert.deepEqual(parseGenre(JSON.stringify({ genre, topic: "Ремонт лавки" }), plan), { genre, topic: "Ремонт лавки" });
+    assert.equal(storedGenre(genrePlan(plan, genre)), genre);
+  }
+  for (const response of ["", "НЕМАЄ", "null", '{"genre":"horror","topic":"Ремонт лавки"}',
+    '{"genre":"court","topic":"Вигадана історія"}', '{"genre":"fairy"}', '{"genre":"ordinary","topic":"Ремонт лавки"}']) {
+    assert.deepEqual(parseGenre(response, plan), { genre: "ordinary", topic: "" });
+  }
+  assert.equal(storedGenre(plan), "ordinary");
+  assert.equal(storedGenre(null), "ordinary");
+});
+
+test("each genre reaches the writer and is stored only after a successful publication", async () => {
+  for (const [genre, label] of [["court", "суд"], ["detective", "детектив"], ["fairy", "казка"]]) {
+    const { db, env, calls, sent } = fixture(); seed(db);
+    chooseGenre(env, { genre, topic: "Ремонт лавки" });
+    await worker.digest(env, "2026-11-04", "manual");
+    assert.ok(writerInput(calls).startsWith(`ЖАНР ВИПУСКУ: ${label}\nГОЛОВНА ІСТОРІЯ ЖАНРУ: Ремонт лавки\n`));
+    assert.equal(storedGenre(db.sql.prepare("SELECT plan FROM digests").get().plan), genre);
+    assert.equal(plays(sent).length, 1);
+    assert.ok(plays(sent)[0].body.text.length <= 3900);
+  }
+});
+
+test("a genre publication forces one ordinary edition across restarts, same-second manual runs and stubs", async () => {
+  const stamp = Date.now(); Date.now = () => stamp;
+  const { db, env } = fixture(); seed(db);
+  const seen = []; chooseGenre(env, { genre: "court", topic: "Ремонт лавки" }, plan, seen);
+  await worker.digest(env, "2026-11-04", "manual");
+  // A stub on another edition must not clear the break.
+  db.sql.prepare("INSERT INTO digests VALUES (?, ?, NULL, ?)").run("2026-11-04", "midday", now() + 1);
+  for (let id = 900; id <= 901; id++) {
+    const next = fixture(db);
+    chooseGenre(next.env, { genre: "court", topic: "Ремонт лавки" }, plan, seen);
+    db.sql.prepare("INSERT INTO messages(message_id,ts,name,text) VALUES(?,?,'TesterA','Нова подія')").run(id, now() - 1);
+    await worker.digest(next.env, "2026-11-04", "manual");
+    assert.equal(storedGenre(db.sql.prepare("SELECT plan FROM digests WHERE kind='manual'").get().plan), id === 900 ? "ordinary" : "court");
+    assert.ok(writerInput(next.calls).startsWith(`ЖАНР ВИПУСКУ: ${id === 900 ? "звичайна" : "суд"}\n`));
+  }
+  assert.equal(seen.length, 2);
+});
+
+test("malformed genre choice falls back to an ordinary play", async () => {
+  const { db, env, calls } = fixture(); seed(db);
+  chooseGenre(env, "not JSON");
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.ok(writerInput(calls).startsWith("ЖАНР ВИПУСКУ: звичайна\n"));
+  assert.equal(storedGenre(db.sql.prepare("SELECT plan FROM digests").get().plan), "ordinary");
+});
+
+test("genre service labels cannot leak into the published play", async () => {
+  const { env, db, sent } = fixture(); seed(db);
+  const run = env.AI.run;
+  env.AI.run = async (model, args) => args.messages?.[0]?.content.startsWith("Ти — Бабця з альтанки, бот")
+    ? completion(`ЖАНР ВИПУСКУ: суд\nГОЛОВНА ІСТОРІЯ ЖАНРУ: Ремонт лавки\n${play}`) : run(model, args);
+  chooseGenre(env, { genre: "court", topic: "Ремонт лавки" });
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.equal(plays(sent).length, 1);
+  assert.doesNotMatch(plays(sent)[0].body.text, /ЖАНР ВИПУСКУ|ГОЛОВНА ІСТОРІЯ ЖАНРУ|\[genre=/);
+});
+
+test("a fully translated name in a stage remark is restored before the missing-member roll call", async () => {
+  const { db, env, sent } = fixture(); seed(db);
+  db.sql.exec("UPDATE messages SET name='Zina Hrytsenko' WHERE name='TesterA'");
+  const run = env.AI.run;
+  const draft = "«Лавка»\nДійові особи:\nTesterB — приносить фарбу\n\n(Сцена 1. Двір.)\nTesterB: Лавку пофарбуємо до обіду.\n(Зіна Гріценко з’являється з печивом.)\n\nМораль: Фарба сохне, а чай стигне.";
+  env.AI.run = async (model, args) => args.messages?.[0]?.content.startsWith("Ти — Бабця з альтанки, бот")
+    ? completion(draft) : run(model, args);
+  await worker.digest(env, "2026-11-04", "manual");
+  const text = plays(sent)[0].body.text;
+  assert.ok(text.includes("(Zina Hrytsenko з’являється з печивом.)"));
+  assert.doesNotMatch(text, /Зіна Гріценко|Також у дворі галасували/);
+  assert.equal((text.match(/Zina Hrytsenko/g) || []).length, 1);
+});
+
+test("failed send and keep preview do not advance genre history", async () => {
+  const { db, env } = fixture(); seed(db);
+  chooseGenre(env, { genre: "fairy", topic: "Ремонт лавки" });
+  const send = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ ok: false, description: "synthetic rejection" });
+  await assert.rejects(worker.digest(env, "2026-11-04", "manual"), /synthetic rejection/);
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM digests").get().n, 0);
+  globalThis.fetch = send;
+  await worker.digest(env, "2026-11-04", "manual", true);
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM digests").get().n, 0);
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM messages WHERE processed=0").get().n, 60);
+});
+
+test("a manual stub cannot erase a successful genre plan in the same edition", async () => {
+  const { db, env } = fixture(); seed(db);
+  const previous = genrePlan(plan, "detective");
+  db.sql.prepare("INSERT INTO digests VALUES (?, ?, ?, ?)").run("2026-11-04", "manual", previous, now() - 200);
+  env.AI.run = async () => completion("");
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.equal(db.sql.prepare("SELECT plan FROM digests").get().plan, previous);
+});
+
+test("big days select the genre from all plan chunks before sending one choice to the writer", async () => {
+  const { db, env, calls } = fixture(); seed(db, 501);
+  db.sql.exec("UPDATE messages SET ts = ts - 600");
+  const seen = []; chooseGenre(env, { genre: "detective", topic: "Ремонт лавки" }, plan, seen);
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.equal(seen.length, 1);
+  for (const n of [1, 2, 3]) assert.ok(seen[0].includes(`ЧАСТИНА ${n} з 3`));
+  assert.ok(writerInput(calls).startsWith("ЖАНР ВИПУСКУ: детектив\n"));
+});
 
 test("all text AI inputs redact contacts without removing names, language, swearing or ordinary numbers", async () => {
   const { env, calls } = fixture();

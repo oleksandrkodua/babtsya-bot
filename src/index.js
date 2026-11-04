@@ -1,6 +1,11 @@
 // Бабця з альтанки — Cloudflare Worker: Telegram webhook in, hourly digest out.
 import analyzePrompt from "../prompts/analyze.txt";
 import writePrompt from "../prompts/write.txt";
+import genrePrompt from "../prompts/genre.txt";
+import genresPrompt from "../prompts/genres.txt";
+import editScenesPrompt from "../prompts/edit-scenes.txt";
+import { storedGenre, genrePlan, parseGenre, genreHint } from "./genres.js";
+import { playScenes, applySceneEdits, compactScenes } from "./scenes.js";
 import polishPrompt from "../prompts/polish.txt";
 import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
@@ -304,9 +309,9 @@ async function digestRun(env, day, kind, keep, chat, renew) {
   const header = genderLine(rows.map((r) => r.name), femaleSet(env.FEMALE_NAMES)) +
     (tags.size ? `ПІДПИСИ УЧАСНИКІВ\n${[...tags].map(([n, t]) => `${n} «${t}»`).join("\n")}\n\n` : "");
   const protectedTerms = [...new Set(rows.map((r) => r.name)), ...tags.values(), BOT_NAME];
-  const prev = await env.DB.prepare("SELECT plan FROM digests WHERE plan IS NOT NULL ORDER BY created DESC LIMIT 1").first("plan");
+  const prev = await env.DB.prepare("SELECT plan FROM digests WHERE plan IS NOT NULL ORDER BY created DESC, rowid DESC LIMIT 1").first("plan");
 
-  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms, tags, kind === "evening" ? await pollText(env, day).catch((e) => (console.log("poll text:", e.message), "")) : "");
+  const play = await buildPlay(env, lines, header, prev ? prevContext(prev) : "", protectedTerms, tags, kind === "evening" ? await pollText(env, day).catch((e) => (console.log("poll text:", e.message), "")) : "", storedGenre(prev) !== "ordinary");
   const prefix = env.TEST_MODE === "1" ? `[ТЕСТ · ${kind} · ${rows.length} повідомлень]\n\n` : "";
 
   if (!play.text) {
@@ -317,7 +322,8 @@ async function digestRun(env, day, kind, keep, chat, renew) {
     await renew();
     await telegram(env, "sendMessage", { chat_id: chat, text: prefix + STUB });
     // A preview's stub records nothing: an "evening" row would make the cron skip the real evening play (29.09.2026).
-    if (!keep) await env.DB.prepare("INSERT OR REPLACE INTO digests (day, kind, plan, created) VALUES (?, ?, NULL, ?)").bind(day, kind, runStart).run();
+    // A later manual stub must not erase the last published plan or its genre break.
+    if (!keep) await env.DB.prepare("INSERT OR IGNORE INTO digests (day, kind, plan, created) VALUES (?, ?, NULL, ?)").bind(day, kind, runStart).run();
     return `${kind}: заглушка (${play.error})`;
   }
   if (prefix.length + play.text.length > HARD_LIMIT) return `${kind}: текст перевищує ${HARD_LIMIT} символів — повідомлення збережено`;
@@ -648,7 +654,7 @@ async function newGrumble(env, section, list, clock = "", chat = "") {
   return text.slice(0, 300);
 }
 
-async function buildPlay(env, lines, header, context, protectedTerms, tags = new Map(), remark = "") {
+async function buildPlay(env, lines, header, context, protectedTerms, tags = new Map(), remark = "", genreBreak = false) {
   const intro = "Повідомлення групи «Альтанка біля АТБ»:\n\n";
   const parts = splitChunks(lines);
   const plans = [], result = {};
@@ -659,6 +665,9 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     plans.push(text);
   }
   const plan = plans.join("\n\n");
+  const choice = genreBreak ? { genre: "ordinary", topic: "" }
+    : parseGenre(await ai(env, genrePrompt, plan, 0.2, 200, 0), plan);
+  console.log(`Жанр випуску: ${choice.genre}${choice.topic ? ` — ${choice.topic}` : ""}`);
 
   const writerLines = withoutReposts(lines);
   const writerChat = writerLines.join("\n");
@@ -667,7 +676,7 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   const chatPart = writerLines.length <= BIG_DAY ? header + writerChat : "не надано — день великий, пиши лише за планом; найкраща фраза кожної теми в плані дослівна";
   const image = IMAGES[Math.floor(Math.random() * IMAGES.length)], night = nightLine(writerLines);
   const chron = await yard(env);
-  let play = await ai(env, writePrompt, `${chron ? `ХРОНІКА ДВОРУ (давні історії й меми):\n${chron}\n\n` : ""}ОБРАЗ ДНЯ: ${image}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${night}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP, 6000, 20000, Infinity, result);
+  let play = await ai(env, writePrompt + "\n\n" + genresPrompt, `${genreHint(choice)}\n${chron ? `ХРОНІКА ДВОРУ (давні історії й меми):\n${chron}\n\n` : ""}ОБРАЗ ДНЯ: ${image}\nОБСЯГ: ${writerLines.length} повідомлень — пиши ${lo}–${hi} символів, не більше ${hi}.\n${night}\n\nПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}`, WRITER_TEMP, 6000, 20000, Infinity, result);
   if (!play) return { error: "п'єса", why: result.error };
 
   if (play.length > HARD_LIMIT) {
@@ -682,7 +691,14 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
   }
   // Nicknames back to Telegram names first: "Ніна: …" with Lida's own words was taken for someone else's (review 30.09.2026).
   const senders = protectedTerms.filter((t) => t !== BOT_NAME && lines.some((l) => l.includes(`] ${t}: `)));
-  play = aliasSpeakers(play, parseAliases(env.ALIASES), senders);
+  play = plainMoral(fixNames(aliasSpeakers(play, parseAliases(env.ALIASES), senders), senders));
+  const scenes = playScenes(play, senders);
+  if (scenes.length) {
+    const edits = await ai(env, editScenesPrompt, `${genreHint(choice)}\n${header}ПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}\n\nСЦЕНИ:\n${JSON.stringify(scenes.map(({ id, header, body, lines }) => ({ id, header, text: body, replicas: lines.length })))}`, 0.7, 2000, 0);
+    const edited = applySceneEdits(play, edits, senders);
+    console.log(`Редактор сцен: ${edited !== play ? "правки прийнято" : "без прийнятих правок"}`);
+    play = edited;
+  }
   const copied = copiedLines(play, writerLines);
   if (copied.length > COPY_MAX) {
     const fix = await ai(env, "Ці репліки п'єси майже дослівно переписані з чату сусідів. Перекажи кожну своїми словами в стилі п'єси Подерв'янського: урочистість на рівному місці, абсурдне порівняння з побутом, суржик і мат лишаються, зміст не змінюй, ім'я героя на початку не чіпай. Для КОЖНОЇ репліки виведи рядок «стара репліка => нова репліка». Нічого, крім цих пар, не пиши.", copied.join("\n"), 0.9, 900);
@@ -742,7 +758,9 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     play = keepHead(play, short);
     full = await build(play);
   }
-  return { text: finalize(full), plan };
+  const compact = compactScenes(full, senders);
+  if (compact !== full) console.log("Структура сцен: короткі діалоги перетворено на ремарки, нумерацію вирівняно");
+  return { text: finalize(compact), plan: genrePlan(plan, choice.genre) };
 }
 
 // One retry on an empty answer or an error (rate limit, "finish_reason: length"), per requirements.

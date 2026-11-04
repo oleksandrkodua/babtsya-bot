@@ -4,6 +4,6 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node check-imports.mjs && node --check src/index.js && node src/pipeline.js && node src/remind.js && node poll.js && node --test tests/worker.test.mjs"
+    "test": "node check-imports.mjs && node --check src/index.js && node src/pipeline.js && node src/remind.js && node poll.js && node --test tests/*.test.mjs"
   }
 }
