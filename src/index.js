@@ -4,8 +4,9 @@ import writePrompt from "../prompts/write.txt";
 import genrePrompt from "../prompts/genre.txt";
 import genresPrompt from "../prompts/genres.txt";
 import editScenesPrompt from "../prompts/edit-scenes.txt";
+import editRemarksPrompt from "../prompts/edit-remarks.txt";
 import { storedGenre, genrePlan, parseGenre, genreHint } from "./genres.js";
-import { playScenes, applySceneEdits, compactScenes } from "./scenes.js";
+import { playScenes, applySceneEdits, compactScenes, trailingRemarks, applyRemarkEdits } from "./scenes.js";
 import polishPrompt from "../prompts/polish.txt";
 import grumblesText from "../prompts/grumbles.txt";
 import replyPrompt from "../prompts/reply.txt";
@@ -138,7 +139,7 @@ export default {
         if (r.text) await telegram(env, "sendMessage", { chat_id: env.TEST_CHAT_ID, text: r.text });
         return new Response(r.err ? `ЗБІЙ: ${r.err}` : r.text ? `ВІДПОВІДЬ (оцінка ${r.score ?? "—"}): ${r.text}\n\nРОЗБІР:\n${r.brief || `— (${r.briefWhy})`}` : `ПОРОЖНЬО; модель: ${r.briefWhy || "порожній текст"}\n\nРОЗБІР:\n${r.brief || "—"}`);
       }
-      // ?kind=poll[&to=group] — one poll now, same as the 21:00 one.
+      // ?kind=poll[&to=group] — one poll now, same as the 19:00 one.
       if (kind === "poll") return new Response(await poll(env, toGroup));
       // ?kind=gif[&to=me] — one GIF from the stock now (to=me: your private chat).
       if (kind === "gif") return new Response(await gif(env, url.searchParams.get("to") === "me" ? env.TEST_CHAT_ID : target(env, toGroup)));
@@ -698,6 +699,15 @@ async function buildPlay(env, lines, header, context, protectedTerms, tags = new
     const edited = applySceneEdits(play, edits, senders);
     console.log(`Редактор сцен: ${edited !== play ? "правки прийнято" : "без прийнятих правок"}`);
     play = edited;
+  }
+  const remarks = trailingRemarks(play, senders);
+  if (remarks.length) {
+    try {
+      const edits = await ai(env, editRemarksPrompt, `ПЛАН ДНЯ:\n${plan}\n\nЧАТ:\n${chatPart}\n\nРЕМАРКИ:\n${JSON.stringify(remarks.map((r, i) => ({ remark: i + 1, text: r.text })))}`, 0.5, 1200, 0);
+      const edited = applyRemarkEdits(play, edits, senders);
+      console.log(`Редактор ремарок: ${edited !== play ? "правки прийнято" : "без прийнятих правок"}`);
+      play = edited;
+    } catch (e) { console.log(`Редактор ремарок: ${e.message}`); }
   }
   const copied = copiedLines(play, writerLines);
   if (copied.length > COPY_MAX) {

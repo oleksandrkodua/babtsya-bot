@@ -112,7 +112,7 @@ export const warWords = (play, chat) => [...new Set((play.match(WAR_WORDS) || []
 // on odd days, Сусід's phrase on even ones (the GIFs are manual only now). The ticks come from the date itself, so there's
 // nothing to store; scheduled() also claims every tick in D1, so a second cron delivery can't post it twice (13.10: two
 // grumbles at 17:00 and 17:01). (Was a fixed 17:00 grumble till 13.10, every 3.5 h till then, every 2 h till 10.10.)
-// 20:00–08:00 she is silent: the evening has the 21:00 poll and the 22:00 play (user, 25.09.2026).
+// 20:00–08:00 she is silent except for the 22:00 play and replies (poll moved to 19:00).
 // ponytail: one-off (user, 30.09.2026, out of neurons) — silent till 22:30, then the evening play; the poll is sent by hand
 // (/run?kind=poll&to=group, ~20:00) and closed at 02:00 next night. Drop after 30.09.
 export const ONE_OFF = { day: "2026-09-30", quietUntil: 22 * 60 + 30, evening: 22 * 60 + 30 }; // minutes of the day
@@ -146,7 +146,7 @@ export async function claim(db, key, now = Date.now()) {
 // What the cron owes at a Kyiv day and minute of the day — the one schedule, read by scheduled() and by plan.mjs
 // (30.09.2026: a hand-copied plan.mjs would drift). Runtime guards (≥50 messages, already done, stock size, TEASE set,
 // no grumble right under a play) stay in scheduled().
-export const MIDDAY_MINUTE = 13 * 60, POLL_MINUTE = 21 * 60;
+export const MIDDAY_MINUTE = 13 * 60, POLL_MINUTE = 19 * 60;
 export function due(day, m) {
   const o = oneOff(day), hour = Math.floor(m / 60), out = [];
   if (o && m < o.quietUntil) return ["тиша"];
@@ -1772,7 +1772,7 @@ if (import.meta.main) {
   assert.ok(due("2026-09-30", 1350).includes("вечірня п'єса") && !due("2026-09-30", 1350).includes("закрити опитування"));
   assert.ok(due("2026-10-24", 780).includes("денна п'єса") && due("2026-10-24", 810).includes("денна п'єса")); // 24.10.2026: one retry
   assert.ok(!due("2026-10-24", 750).includes("денна п'єса") && !due("2026-10-24", 840).includes("денна п'єса"));
-  assert.ok(due("2026-10-01", 1260).includes("опитування") && due("2026-10-01", 1320).includes("вечірня п'єса"));
+  assert.ok(due("2026-10-01", 1140).includes("опитування") && !due("2026-10-01", 1260).includes("опитування") && due("2026-10-01", 1320).includes("вечірня п'єса") && due("2026-10-01", 1320).includes("закрити опитування"));
   assert.ok(due("2026-10-01", 120).includes("закрити вчорашнє опитування"));
   assert.equal(oneOff("2026-09-30")?.evening, 1350);
   assert.equal(oneOff("2026-10-01"), null);

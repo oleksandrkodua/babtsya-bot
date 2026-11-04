@@ -21,6 +21,33 @@ export function playScenes(play, names) {
 }
 
 const numbers = (text) => [...new Set(text.match(/\d+(?:[.,]\d+)?/g) || [])].sort().join("|");
+export function trailingRemarks(play, names) {
+  const scenes = playScenes(play, names);
+  if (!scenes.length) return [];
+  const start = scenes.at(-1).end, end = play.indexOf("\nМораль:", start);
+  if (end < 0) return [];
+  return [...play.slice(start, end).matchAll(/^\([^\n]+\)[ \t]*$/gm)].map((m) => ({ text: m[0], at: start + m.index }));
+}
+
+export function applyRemarkEdits(play, response, names) {
+  let edits;
+  try { edits = JSON.parse(response).edits; } catch { return play; }
+  if (!Array.isArray(edits)) return play;
+  const remarks = trailingRemarks(play, names), accepted = new Map();
+  for (const edit of edits) {
+    const item = remarks[edit?.remark - 1];
+    if (!item || accepted.has(edit.remark) || typeof edit.text !== "string") continue;
+    const text = edit.text.trim();
+    const people = (s) => names.filter((name) => s.includes(name)).sort().join("|");
+    if (!/^\([^\n]+\)$/.test(text) || /^\(Сцена\b/.test(text) || text.length > item.text.length + 400 || numbers(text) !== numbers(item.text) || people(text) !== people(item.text)) continue;
+    accepted.set(edit.remark, text);
+  }
+  for (let i = remarks.length - 1; i >= 0; i--) if (accepted.has(i + 1)) {
+    const item = remarks[i];
+    play = play.slice(0, item.at) + accepted.get(i + 1) + play.slice(item.at + item.text.length);
+  }
+  return play;
+}
 export function applySceneEdits(play, response, names) {
   let edits;
   try { edits = JSON.parse(response).edits; } catch { return play; }

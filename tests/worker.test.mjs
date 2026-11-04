@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test, afterEach } from "node:test";
 import { storedGenre, genrePlan, parseGenre } from "../src/genres.js";
+import { trailingRemarks, applyRemarkEdits } from "../src/scenes.js";
 
 // Load the real Worker with text imports in Node; every external call below is a mock.
 const root = new URL("../", import.meta.url);
@@ -100,6 +101,31 @@ function chooseGenre(env, choice, inputPlan = plan, seen = []) {
   };
 }
 const writerInput = (calls) => calls.filter((c) => c.messages?.[0]?.content.startsWith("Ти — Бабця з альтанки, бот")).at(-1)?.messages[1].content;
+
+test("remark edits stay within the closing remarks and preserve names and numbers", () => {
+  const source = play.replace("\n\nМораль:", "\n\n(TesterA чекає 2 книжки.)\n\nМораль:");
+  const names = ["TesterA", "TesterB"];
+  assert.equal(trailingRemarks(source, names).length, 1);
+  const edit = (text) => JSON.stringify({ edits: [{ remark: 1, text }] });
+  assert.equal(applyRemarkEdits(source, edit("(TesterA чекає 2 дитячі книжки.)"), names), source.replace("(TesterA чекає 2 книжки.)", "(TesterA чекає 2 дитячі книжки.)"));
+  for (const bad of ["not JSON", edit("(TesterB чекає 2 книжки.)"), edit("(TesterA чекає 3 книжки.)"), edit("(Сцена 2.)"), edit("(Сцена 2.)\nTesterA: ні")]) assert.equal(applyRemarkEdits(source, bad, names), source);
+});
+
+test("a separate remark editor updates the closing remark before publication", async () => {
+  const { db, env, sent } = fixture(); seed(db);
+  const run = env.AI.run;
+  let count = 0;
+  env.AI.run = async (model, args) => {
+    const system = args.messages?.[0]?.content || "";
+    if (system.startsWith("Ти — Бабця з альтанки, бот")) return completion(play.replace("\n\nМораль:", "\n\n(TesterA чекає 2 книжки.)\n\nМораль:"));
+    if (system.startsWith("Ти — редактор ремарок")) { count++; return completion(JSON.stringify({ edits: [{ remark: 1, text: "(TesterA чекає 2 дитячі книжки.)" }] })); }
+    return run(model, args);
+  };
+  await worker.digest(env, "2026-11-04", "manual");
+  assert.equal(count, 1);
+  assert.ok(plays(sent)[0].body.text.includes("(TesterA чекає 2 дитячі книжки.)"));
+  assert.ok(plays(sent)[0].body.text.length <= 3900);
+});
 
 test("one scene-editing pass precedes the corrector and sends the edited play to the group once", async () => {
   const { db, env, sent, calls } = fixture(); seed(db);
